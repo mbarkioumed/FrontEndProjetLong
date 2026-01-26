@@ -353,3 +353,153 @@ canvas {
         grid-template-columns: 1fr;
     }
 }
+/* ===========================
+   PatientsExplorer (Dataset)
+   =========================== */
+
+.pe-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.pe-muted {
+  color: var(--text-muted);
+}
+
+.pe-input {
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  background: white;
+}
+
+.pe-input:focus {
+  outline: none;
+  border-color: rgba(37, 99, 235, 0.5);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.pe-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+  background: white;
+}
+
+.pe-list {
+  max-height: 380px;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+}
+
+/* Item patient */
+.pe-item {
+  cursor: pointer;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: white;
+  display: grid;
+  gap: 4px;
+  transition: transform 0.08s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+.pe-item:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+  border-color: #cbd5e1;
+}
+
+.pe-item.active {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.pe-item-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.pe-item-id {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pe-item-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Pills / chips */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 9999px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Modalité / fichiers */
+.pe-block {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px;
+  background: white;
+}
+
+.pe-block-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.pe-block-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.pe-file {
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pe-pre {
+  margin-top: 10px;
+  background: #fafafa;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+/* Responsive: deux colonnes -> une colonne */
+@media (max-width: 900px) {
+  .pe-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
