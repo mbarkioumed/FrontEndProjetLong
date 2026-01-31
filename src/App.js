@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from "react";
+import { useContext } from "react";
 import "./App.css";
+import AuthContext from "./context/AuthContext";
+import Login from "./components/Login";
 import SliceCanvas from "./components/SliceCanvas";
+import Fusion3D from "./components/Fusion3D"; // New 3D View import
 import SpectrumChart from "./components/SpectrumChart";
 import PatientsExplorer from "./components/PatientsExplorer";
+import FusionViewer from "./components/FusionViewer";
 const API_URL = "http://127.0.0.1:8000";
 
 // ===============================
@@ -134,6 +139,7 @@ const PLANE_LABEL = {
 };
 
 function App() {
+    const { user, token, logout, loading: authLoading } = useContext(AuthContext);
     const [view, setView] = useState("home");
     const [backendStatus, setBackendStatus] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -159,11 +165,10 @@ function App() {
     const [selectedVoxel, setSelectedVoxel] = useState(null);
     const [currentSpectrum, setCurrentSpectrum] = useState(null);
 
-    // ✅ Orientation IRM réglable (debug). Une fois OK, tu peux figer les valeurs.
     const [orientIRM, setOrientIRM] = useState({
-        sagittal: { flipY: true, flipX: false, rotate: 0, transpose: false },
-        coronal: { flipY: true, flipX: false, rotate: 0, transpose: false },
-        axial: { flipY: true, flipX: false, rotate: 0, transpose: false },
+        sagittal: { flipY: false, flipX: false, rotate: -90, transpose: false },
+        coronal: { flipY: false, flipX: false, rotate: -90, transpose: false },
+        axial: { flipY: false, flipX: false, rotate: 90, transpose: false },
     });
 
     // Helpers
@@ -214,10 +219,12 @@ function App() {
     };
 
     useEffect(() => {
-        checkStatus();
-        const interval = setInterval(checkStatus, 10000);
-        return () => clearInterval(interval);
-    }, []);
+        if (user) {
+            checkStatus();
+            const interval = setInterval(checkStatus, 10000);
+            return () => clearInterval(interval);
+        }
+    }, [user]);
 
     useEffect(() => {
         document.documentElement.setAttribute("data-theme", theme);
@@ -251,6 +258,9 @@ function App() {
             const endpoint = type === "IRM" ? "/upload-irm/" : "/upload-mrsi/";
             const response = await fetch(`${API_URL}${endpoint}`, {
                 method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${token}`
+                },
                 body: formData,
             });
 
@@ -262,17 +272,18 @@ function App() {
             // Initialisation des indices au centre pour l'IRM
             if (data.type === "IRM") {
                 setIrmResults(data);
-                const x = Math.floor(data.shape[0] / 2);
-                const y = Math.floor(data.shape[1] / 2);
-                const z = Math.floor(data.shape[2] / 2);
-
                 setSliceIndices((prev) => ({
                     ...prev,
-                    sagittal: x,
-                    coronal: y,
-                    axial: z,
+                    sagittal: Math.floor(data.shape[0] / 2),
+                    coronal: Math.floor(data.shape[1] / 2),
+                    axial: Math.floor(data.shape[2] / 2),
                 }));
-                setCursor3D({ x, y, z });
+                // Reset cursor
+                setCursor3D({ 
+                     x: Math.floor(data.shape[0] / 2),
+                     y: Math.floor(data.shape[1] / 2),
+                     z: Math.floor(data.shape[2] / 2)
+                });
                 setView("irm");
             } else if (data.type === "MRSI") {
                 setMrsiResults(data);
@@ -297,11 +308,16 @@ function App() {
         const z = zOverride !== null ? zOverride : sliceIndices.mrsi;
         setLoading(true);
         try {
-            const response = await fetch(`${API_URL}/spectrum/${x}/${y}/${z}`);
+            const response = await fetch(`${API_URL}/spectrum/${x}/${y}/${z}`, {
+                headers: {
+                    "Authorization": `Bearer ${token}`
+                }
+            });
             const data = await response.json();
             if (data.error) throw new Error(data.error);
             setCurrentSpectrum(data);
             setSelectedVoxel({ x, y });
+            return data; // Return for FusionViewer
         } catch (err) {
             setError(`Erreur spectre : ${err.message}`);
         } finally {
@@ -393,9 +409,10 @@ function App() {
             <div
                 style={{
                     display: "flex",
-                    gap: "1rem",
+                    gap: "0.5rem",
                     flexWrap: "wrap",
-                    marginTop: "0.75rem",
+                    marginTop: "0.5rem",
+                    justifyContent: "center"
                 }}
             >
                 {["sagittal", "coronal", "axial"].map((plane) => (
@@ -523,17 +540,35 @@ function App() {
         if (!results) return null;
 
         if (results.type === "IRM") {
-            // Slices + dims (original)
-            const sagSlice = results.volumes.sagittal[sliceIndices.sagittal];
-            const corSlice = results.volumes.coronal[sliceIndices.coronal];
-            const axSlice = results.volumes.axial[sliceIndices.axial];
+            // Optimization Update: results.data is [X][Y][Z] (single 3D array)
+            const vol = results.data;
+            if (!vol) {
+                // Handle legacy state/error
+                return <div className="error-message">Données invalides ou obsolètes. Veuillez re-uploader le fichier.</div>;
+            }
+
+            // Extract slices on the fly
+            const sx = sliceIndices.sagittal;
+            const sy = sliceIndices.coronal;
+            const sz = sliceIndices.axial;
+
+            // Sagittal: vol[sx][:][:] -> Y x Z
+            // Note: vol[sx] returns a 2D array [Y][Z]
+            const sagSlice = (sx < vol.length) ? vol[sx] : [];
+
+            // Coronal: vol[:][sy][:] -> X x Z
+            // We need to map row by row
+            const corSlice = vol.map(row => (sy < row.length) ? row[sy] : []);
+
+            // Axial: vol[:][:][sz] -> X x Y
+            const axSlice = vol.map(row => row.map(col => (sz < col.length) ? col[sz] : 0));
 
             // dims originales (avant orientation)
             const sagH = sagSlice?.length ?? 0;
             const sagW = sagSlice?.[0]?.length ?? 0;
 
-            const corH = corSlice?.length ?? 0;
             const corW = corSlice?.[0]?.length ?? 0;
+            const corH = corSlice?.length ?? 0;
 
             const axH = axSlice?.length ?? 0;
             const axW = axSlice?.[0]?.length ?? 0;
@@ -573,14 +608,16 @@ function App() {
                                         sagDispH,
                                         orientIRM.sagittal,
                                     );
-                                    handleSagittalClick(p.x, p.y);
+                                    // Fix: p.y is Y (row), p.x is Z (col)
+                                    handleSagittalClick(p.y, p.x);
                                 }}
                                 crosshair={crosshairXY(
                                     "sagittal",
                                     sagW,
                                     sagH,
-                                    cursor3D?.y,
+                                    // Fix: Horizontal is Z, Vertical is Y
                                     cursor3D?.z,
+                                    cursor3D?.y,
                                 )}
                             />
                             <input
@@ -612,14 +649,16 @@ function App() {
                                         corDispH,
                                         orientIRM.coronal,
                                     );
-                                    handleCoronalClick(p.x, p.y);
+                                    // Fix: p.y is X (row), p.x is Z (col)
+                                    handleCoronalClick(p.y, p.x);
                                 }}
                                 crosshair={crosshairXY(
                                     "coronal",
                                     corW,
                                     corH,
-                                    cursor3D?.x,
+                                    // Fix: Horizontal is Z, Vertical is X
                                     cursor3D?.z,
+                                    cursor3D?.x,
                                 )}
                             />
                             <input
@@ -651,14 +690,16 @@ function App() {
                                         axDispH,
                                         orientIRM.axial,
                                     );
-                                    handleAxialClick(p.x, p.y);
+                                    // Fix: p.y is X (row), p.x is Y (col)
+                                    handleAxialClick(p.y, p.x);
                                 }}
                                 crosshair={crosshairXY(
                                     "axial",
                                     axW,
                                     axH,
-                                    cursor3D?.x,
+                                    // Fix: Horizontal is Y, Vertical is X
                                     cursor3D?.y,
+                                    cursor3D?.x,
                                 )}
                             />
                             <input
@@ -674,6 +715,18 @@ function App() {
                                 }
                                 className="volume-slider"
                             />
+                        </div>
+
+
+                        {/* 4. 3D Brain View */}
+                        <div className="slice-control" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: "350px"}}>
+                             <div style={{ flex: 1, width: "100%", minHeight: "300px", background: "black", borderRadius: "4px", overflow:"hidden" }}>
+                                <Fusion3D 
+                                    irmData={results} 
+                                    cursor3D={cursor3D} 
+                                />
+                             </div>
+                             <span className="slice-label" style={{marginTop: "0.5rem"}}>3D Brain Preview</span>
                         </div>
                     </div>
 
@@ -773,54 +826,8 @@ function App() {
         );
     };
 
-    const renderAuth = () => (
-        <div className="auth-container">
-            <div className="auth-card">
-                <div className="auth-header">
-                    <h1>Connexion</h1>
-                    <p className="placeholder-msg">
-                        Espace réservé au personnel médical
-                    </p>
-                </div>
-                <form onSubmit={(e) => e.preventDefault()}>
-                    <div className="form-group">
-                        <label>Identifiant</label>
-                        <input
-                            type="text"
-                            placeholder="Ex: dr.smith"
-                            disabled
-                        />
-                    </div>
-                    <div className="form-group">
-                        <label>Mot de passe</label>
-                        <input
-                            type="password"
-                            style={{
-                                width: "100%",
-                                padding: "0.625rem",
-                                border: "1px solid var(--border-color)",
-                                borderRadius: "6px",
-                                background: "var(--input-bg)",
-                                color: "var(--text-main)",
-                            }}
-                            disabled
-                        />
-                    </div>
-                    <button
-                        className="btn-primary"
-                        style={{ width: "100%" }}
-                        disabled
-                    >
-                        Se connecter
-                    </button>
-                </form>
-                <p className="placeholder-msg" style={{ marginTop: "2rem" }}>
-                    Note: Le module d'authentification sera implémenté
-                    prochainement.
-                </p>
-            </div>
-        </div>
-    );
+    if (authLoading) return <div className="loading-screen">Chargement...</div>;
+    if (!user) return <Login />;
 
     return (
         <div className="App">
@@ -854,13 +861,24 @@ function App() {
                     >
                         <span>👤 Patients</span>
                     </div>
+
                     <div
-                        className={`nav-item ${view === "auth" ? "active" : ""}`}
-                        onClick={() => setView("auth")}
+                        className={`nav-item ${view === "fusion" ? "active" : ""} ${(!irmResults || !mrsiResults) ? "disabled" : ""}`}
+                        onClick={() => {
+                            if (irmResults && mrsiResults) setView("fusion");
+                        }}
+                        style={{ 
+                            opacity: (!irmResults || !mrsiResults) ? 0.5 : 1,
+                            cursor: (!irmResults || !mrsiResults) ? "not-allowed" : "pointer" 
+                        }}
                     >
-                        <span>👤 Connexion</span>
+                        <span>🔮 Fusion</span>
                     </div>
                 </nav>
+                
+                <div className="sidebar-footer">
+                     <button className="btn-logout" onClick={logout}>Déconnexion</button>
+                </div>
             </div>
 
             <div className="main-area">
@@ -893,7 +911,7 @@ function App() {
                                 fontSize: "0.875rem",
                             }}
                         >
-                            Invité
+                            {user.username}
                         </span>
                     </div>
                 </div>
@@ -923,7 +941,13 @@ function App() {
                         {renderResults(mrsiResults)}
                     </>
                 )}
-                {view === "auth" && renderAuth()}
+                {view === "fusion" && (
+                    <FusionViewer 
+                        irmData={irmResults} 
+                        mrsiData={mrsiResults}
+                        fetchSpectrum={(x,y,z) => fetchSpectrum(x,y,z)} 
+                    />
+                )}
                 {view === "patients" && <PatientsExplorer />}
             </div>
         </div>
