@@ -1,7 +1,9 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useContext } from "react";
 import { api } from "../api/client";
+import AuthContext from "../context/AuthContext";
 
 export default function PatientsExplorer() {
+    const { token } = useContext(AuthContext);
     // ===============================
     // State
     // ===============================
@@ -145,7 +147,7 @@ export default function PatientsExplorer() {
 
         setLoading(true);
         try {
-            const res = await api.uploadJsonDataset(payload);
+            const res = await api.uploadJsonDataset(payload, token);
             setResult(res);
 
             const p = res?.patients ?? res;

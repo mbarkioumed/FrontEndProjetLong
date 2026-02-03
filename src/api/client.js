@@ -15,10 +15,13 @@ export const api = {
   },
 
   // ✅ NOUVEAU: envoie un JSON dataset au backend
-  uploadJsonDataset: async (datasetJson) => {
+  uploadJsonDataset: async (datasetJson, token) => {
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers.Authorization = `Bearer ${token}`;
+
     const r = await fetch(`${API_URL}/upload-json-dataset/`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(datasetJson),
     });
     const data = await r.json().catch(() => ({}));

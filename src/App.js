@@ -139,7 +139,12 @@ const PLANE_LABEL = {
 };
 
 function App() {
-    const { user, token, logout, loading: authLoading } = useContext(AuthContext);
+    const {
+        user,
+        token,
+        logout,
+        loading: authLoading,
+    } = useContext(AuthContext);
     const [view, setView] = useState("home");
     const [backendStatus, setBackendStatus] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -167,7 +172,7 @@ function App() {
 
     const [orientIRM, setOrientIRM] = useState({
         sagittal: { flipY: false, flipX: false, rotate: -90, transpose: false },
-        coronal: { flipY: false, flipX: false, rotate: -90, transpose: false },
+        coronal: { flipY: false, flipX: true, rotate: -90, transpose: false },
         axial: { flipY: false, flipX: false, rotate: 90, transpose: false },
     });
 
@@ -259,7 +264,7 @@ function App() {
             const response = await fetch(`${API_URL}${endpoint}`, {
                 method: "POST",
                 headers: {
-                    "Authorization": `Bearer ${token}`
+                    Authorization: `Bearer ${token}`,
                 },
                 body: formData,
             });
@@ -279,10 +284,10 @@ function App() {
                     axial: Math.floor(data.shape[2] / 2),
                 }));
                 // Reset cursor
-                setCursor3D({ 
-                     x: Math.floor(data.shape[0] / 2),
-                     y: Math.floor(data.shape[1] / 2),
-                     z: Math.floor(data.shape[2] / 2)
+                setCursor3D({
+                    x: Math.floor(data.shape[0] / 2),
+                    y: Math.floor(data.shape[1] / 2),
+                    z: Math.floor(data.shape[2] / 2),
                 });
                 setView("irm");
             } else if (data.type === "MRSI") {
@@ -310,8 +315,8 @@ function App() {
         try {
             const response = await fetch(`${API_URL}/spectrum/${x}/${y}/${z}`, {
                 headers: {
-                    "Authorization": `Bearer ${token}`
-                }
+                    Authorization: `Bearer ${token}`,
+                },
             });
             const data = await response.json();
             if (data.error) throw new Error(data.error);
@@ -320,6 +325,55 @@ function App() {
             return data; // Return for FusionViewer
         } catch (err) {
             setError(`Erreur spectre : ${err.message}`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const runFftTraitement = async () => {
+        if (!irmResults?.nom_fichier) return;
+        setLoading(true);
+        setError("");
+        try {
+            const response = await fetch(`${API_URL}/traitement/test_fft/`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify([irmResults.nom_fichier]),
+            });
+
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data?.detail || `Erreur ${response.status}`);
+            }
+
+            if (data?.error) throw new Error(data.error);
+
+            const next = data?.[irmResults.nom_fichier];
+            if (next?.error) throw new Error(next.error);
+            if (!next) throw new Error("Réponse FFT inattendue.");
+
+            if (next.type === "IRM") {
+                setIrmResults(next);
+                setSliceIndices((prev) => ({
+                    ...prev,
+                    sagittal: Math.floor(next.shape[0] / 2),
+                    coronal: Math.floor(next.shape[1] / 2),
+                    axial: Math.floor(next.shape[2] / 2),
+                }));
+                setCursor3D({
+                    x: Math.floor(next.shape[0] / 2),
+                    y: Math.floor(next.shape[1] / 2),
+                    z: Math.floor(next.shape[2] / 2),
+                });
+                setView("irm");
+            } else {
+                setIrmResults(next);
+            }
+        } catch (err) {
+            setError(`Erreur FFT : ${err.message}`);
         } finally {
             setLoading(false);
         }
@@ -412,7 +466,7 @@ function App() {
                     gap: "0.5rem",
                     flexWrap: "wrap",
                     marginTop: "0.5rem",
-                    justifyContent: "center"
+                    justifyContent: "center",
                 }}
             >
                 {["sagittal", "coronal", "axial"].map((plane) => (
@@ -544,7 +598,12 @@ function App() {
             const vol = results.data;
             if (!vol) {
                 // Handle legacy state/error
-                return <div className="error-message">Données invalides ou obsolètes. Veuillez re-uploader le fichier.</div>;
+                return (
+                    <div className="error-message">
+                        Données invalides ou obsolètes. Veuillez re-uploader le
+                        fichier.
+                    </div>
+                );
             }
 
             // Extract slices on the fly
@@ -554,14 +613,16 @@ function App() {
 
             // Sagittal: vol[sx][:][:] -> Y x Z
             // Note: vol[sx] returns a 2D array [Y][Z]
-            const sagSlice = (sx < vol.length) ? vol[sx] : [];
+            const sagSlice = sx < vol.length ? vol[sx] : [];
 
             // Coronal: vol[:][sy][:] -> X x Z
             // We need to map row by row
-            const corSlice = vol.map(row => (sy < row.length) ? row[sy] : []);
+            const corSlice = vol.map((row) => (sy < row.length ? row[sy] : []));
 
             // Axial: vol[:][:][sz] -> X x Y
-            const axSlice = vol.map(row => row.map(col => (sz < col.length) ? col[sz] : 0));
+            const axSlice = vol.map((row) =>
+                row.map((col) => (sz < col.length ? col[sz] : 0)),
+            );
 
             // dims originales (avant orientation)
             const sagH = sagSlice?.length ?? 0;
@@ -588,7 +649,24 @@ function App() {
 
             return (
                 <div className="card">
-                    <h2>Résultats IRM : {results.nom_fichier}</h2>
+                    <div
+                        style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "1rem",
+                            flexWrap: "wrap",
+                        }}
+                    >
+                        <h2>Résultats IRM : {results.nom_fichier}</h2>
+                        <button
+                            className="btn-primary"
+                            onClick={runFftTraitement}
+                            disabled={loading}
+                        >
+                            {loading ? "Traitement..." : "Traitement FFT"}
+                        </button>
+                    </div>
 
                     {/* Panneau d’orientation pour trouver rapidement la bonne config */}
                     {renderOrientationControls()}
@@ -717,16 +795,37 @@ function App() {
                             />
                         </div>
 
-
                         {/* 4. 3D Brain View */}
-                        <div className="slice-control" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: "350px"}}>
-                             <div style={{ flex: 1, width: "100%", minHeight: "300px", background: "black", borderRadius: "4px", overflow:"hidden" }}>
-                                <Fusion3D 
-                                    irmData={results} 
-                                    cursor3D={cursor3D} 
+                        <div
+                            className="slice-control"
+                            style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                height: "100%",
+                                minHeight: "350px",
+                            }}
+                        >
+                            <div
+                                style={{
+                                    flex: 1,
+                                    width: "100%",
+                                    minHeight: "300px",
+                                    background: "black",
+                                    borderRadius: "4px",
+                                    overflow: "hidden",
+                                }}
+                            >
+                                <Fusion3D
+                                    irmData={results}
+                                    cursor3D={cursor3D}
                                 />
-                             </div>
-                             <span className="slice-label" style={{marginTop: "0.5rem"}}>3D Brain Preview</span>
+                            </div>
+                            <span
+                                className="slice-label"
+                                style={{ marginTop: "0.5rem" }}
+                            >
+                                3D Brain Preview
+                            </span>
                         </div>
                     </div>
 
@@ -863,21 +962,26 @@ function App() {
                     </div>
 
                     <div
-                        className={`nav-item ${view === "fusion" ? "active" : ""} ${(!irmResults || !mrsiResults) ? "disabled" : ""}`}
+                        className={`nav-item ${view === "fusion" ? "active" : ""} ${!irmResults || !mrsiResults ? "disabled" : ""}`}
                         onClick={() => {
                             if (irmResults && mrsiResults) setView("fusion");
                         }}
-                        style={{ 
-                            opacity: (!irmResults || !mrsiResults) ? 0.5 : 1,
-                            cursor: (!irmResults || !mrsiResults) ? "not-allowed" : "pointer" 
+                        style={{
+                            opacity: !irmResults || !mrsiResults ? 0.5 : 1,
+                            cursor:
+                                !irmResults || !mrsiResults
+                                    ? "not-allowed"
+                                    : "pointer",
                         }}
                     >
                         <span>🔮 Fusion</span>
                     </div>
                 </nav>
-                
+
                 <div className="sidebar-footer">
-                     <button className="btn-logout" onClick={logout}>Déconnexion</button>
+                    <button className="btn-logout" onClick={logout}>
+                        Déconnexion
+                    </button>
                 </div>
             </div>
 
@@ -942,10 +1046,10 @@ function App() {
                     </>
                 )}
                 {view === "fusion" && (
-                    <FusionViewer 
-                        irmData={irmResults} 
+                    <FusionViewer
+                        irmData={irmResults}
                         mrsiData={mrsiResults}
-                        fetchSpectrum={(x,y,z) => fetchSpectrum(x,y,z)} 
+                        fetchSpectrum={(x, y, z) => fetchSpectrum(x, y, z)}
                     />
                 )}
                 {view === "patients" && <PatientsExplorer />}
