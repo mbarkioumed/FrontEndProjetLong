@@ -5,6 +5,8 @@ import AuthContext from "./context/AuthContext";
 import Login from "./components/Login";
 import SliceCanvas from "./components/SliceCanvas";
 import Fusion3D from "./components/Fusion3D"; // New 3D View import
+import FusionViewer from "./components/FusionViewer";
+import SpectrumModal from "./components/SpectrumModal";
 import SpectrumChart from "./components/SpectrumChart";
 import PatientsExplorer from "./components/PatientsExplorer";
 
@@ -138,6 +140,7 @@ function App() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [irmResults, setIrmResults] = useState(null);
+    const [reference3DData, setReference3DData] = useState(null); // Stable data for 3D View
     const [mrsiResults, setMrsiResults] = useState(null);
     const [theme, setTheme] = useState(
         () => localStorage.getItem("theme") || "light",
@@ -263,6 +266,7 @@ function App() {
             // Initialisation des indices au centre pour l'IRM
             if (data.type === "IRM") {
                 setIrmResults(data);
+                setReference3DData(data); // Initialize 3D view with original data
                 setSliceIndices((prev) => ({
                     ...prev,
                     sagittal: Math.floor(data.shape[0] / 2),
@@ -295,7 +299,33 @@ function App() {
 
 
 
+
+    const fetchSpectrum = async (x, y, zVal = null) => {
+        const z = zVal !== null ? zVal : sliceIndices.mrsi;
+        if (x == null || y == null) return;
+
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_URL}/spectrum/${x}/${y}/${z}`, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+            if (!res.ok) throw new Error("Erreur affichage spectre");
+            const data = await res.json();
+
+            setSelectedVoxel({ x, y, z });
+            setCurrentSpectrum(data);
+        } catch (err) {
+            console.error(err);
+            setError("Impossible de charger le spectre.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const runFftTraitement = async () => {
+
         if (!irmResults?.nom_fichier) return;
         setLoading(true);
         setError("");
@@ -306,7 +336,11 @@ function App() {
                     "Content-Type": "application/json",
                     ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 },
-                body: JSON.stringify([irmResults.nom_fichier]),
+                body: JSON.stringify({
+                    [irmResults.nom_fichier]: {
+                        type_traitement: "fft",
+                    },
+                }),
             });
 
             const data = await response.json().catch(() => ({}));
@@ -761,7 +795,7 @@ function App() {
                                 }}
                             >
                                 <Fusion3D
-                                    irmData={results}
+                                    irmData={reference3DData || results}
                                     cursor3D={cursor3D}
                                 />
                             </div>
@@ -900,12 +934,17 @@ function App() {
                         <span>📊 Upload MRSI</span>
                     </div>
                     <div
+                        className={`nav-item ${view === "fusion" ? "active" : ""}`}
+                        onClick={() => setView("fusion")}
+                    >
+                        <span>🔬 Test Fusion</span>
+                    </div>
+                    <div
                         className={`nav-item ${view === "patients" ? "active" : ""}`}
                         onClick={() => setView("patients")}
                     >
                         <span>👤 Patients</span>
                     </div>
-
                 </nav>
 
                 <div className="sidebar-footer">
@@ -975,8 +1014,26 @@ function App() {
                         {renderResults(mrsiResults)}
                     </>
                 )}
+                
+                {view === "fusion" && (
+                     <FusionViewer 
+                        irmData={irmResults} 
+                        mrsiData={mrsiResults} 
+                        onVoxelClick={(x,y,z) => fetchSpectrum(x,y,z)} 
+                     />
+                )}
 
                 {view === "patients" && <PatientsExplorer />}
+
+                {currentSpectrum && (
+                    <SpectrumModal 
+                        data={currentSpectrum} 
+                        onClose={() => {
+                            setCurrentSpectrum(null);
+                            setSelectedVoxel(null);
+                        }} 
+                    />
+                )}
             </div>
         </div>
     );

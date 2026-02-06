@@ -28,4 +28,18 @@ export const api = {
     if (!r.ok) throw new Error(data?.detail || `HTTP ${r.status}`);
     return data;
   },
+
+  runTreatment: async (catalog, token) => {
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      const r = await fetch(`${API_URL}/traitement/test_fft/`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(catalog),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.detail || `HTTP ${r.status}`);
+      return data;
+  }
 };
