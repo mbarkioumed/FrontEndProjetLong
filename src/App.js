@@ -7,7 +7,7 @@ import SliceCanvas from "./components/SliceCanvas";
 import Fusion3D from "./components/Fusion3D"; // New 3D View import
 import SpectrumChart from "./components/SpectrumChart";
 import PatientsExplorer from "./components/PatientsExplorer";
-import FusionViewer from "./components/FusionViewer";
+
 const API_URL = "http://127.0.0.1:8000";
 
 // ===============================
@@ -38,13 +38,6 @@ const orient2D = (m, o = {}) => {
     return out;
 };
 
-/**
- * Inverse transform pour convertir un clic (x,y) sur l'image affichée
- * vers les coords de l'image originale (avant orient2D).
- *
- * ⚠️ IMPORTANT: width/height doivent être ceux de l'image AFFICHÉE (après orient2D),
- * pas ceux de la slice originale.
- */
 const inversePoint = (x, y, width, height, o = {}) => {
     let px = x,
         py = y;
@@ -87,17 +80,12 @@ const inversePoint = (x, y, width, height, o = {}) => {
     return { x: px, y: py };
 };
 
-/**
- * Transforme un point (x,y) de l'image ORIGINALE vers l'image AFFICHÉE
- * (après orient2D). À utiliser pour les crosshairs.
- */
 const forwardPoint = (x, y, width, height, o = {}) => {
     let px = x,
         py = y;
     let w = width,
         h = height;
 
-    // Appliquer les mêmes opérations que orient2D, dans le même ordre
     if (o.transpose) {
         const nx = py;
         const ny = px;
@@ -179,7 +167,6 @@ function App() {
     // Helpers
     const safeNum = (v) => (typeof v === "number" ? v : null);
 
-    // Crosshair "au moins correct" pour flipX/flipY (et stable si rotate/transpose = 0)
     const crosshairXY = (plane, sliceW, sliceH, xOrig, yOrig) => {
         let x = safeNum(xOrig);
         let y = safeNum(yOrig);
@@ -189,7 +176,6 @@ function App() {
         return forwardPoint(x, y, sliceW, sliceH, o);
     };
 
-    // Handlers IRM crosshair (synchro des 3 vues) — coords en référentiel ORIGINAL
     const handleAxialClick = (x, y) => {
         const z = sliceIndices.axial;
         setCursor3D({ x, y, z });
@@ -307,28 +293,7 @@ function App() {
         }
     };
 
-    const fetchSpectrum = async (x, y, zOverride = null) => {
-        if (!mrsiResults) return;
 
-        const z = zOverride !== null ? zOverride : sliceIndices.mrsi;
-        setLoading(true);
-        try {
-            const response = await fetch(`${API_URL}/spectrum/${x}/${y}/${z}`, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            });
-            const data = await response.json();
-            if (data.error) throw new Error(data.error);
-            setCurrentSpectrum(data);
-            setSelectedVoxel({ x, y });
-            return data; // Return for FusionViewer
-        } catch (err) {
-            setError(`Erreur spectre : ${err.message}`);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     const runFftTraitement = async () => {
         if (!irmResults?.nom_fichier) return;
@@ -594,10 +559,8 @@ function App() {
         if (!results) return null;
 
         if (results.type === "IRM") {
-            // Optimization Update: results.data is [X][Y][Z] (single 3D array)
             const vol = results.data;
             if (!vol) {
-                // Handle legacy state/error
                 return (
                     <div className="error-message">
                         Données invalides ou obsolètes. Veuillez re-uploader le
@@ -606,25 +569,18 @@ function App() {
                 );
             }
 
-            // Extract slices on the fly
             const sx = sliceIndices.sagittal;
             const sy = sliceIndices.coronal;
             const sz = sliceIndices.axial;
 
-            // Sagittal: vol[sx][:][:] -> Y x Z
-            // Note: vol[sx] returns a 2D array [Y][Z]
             const sagSlice = sx < vol.length ? vol[sx] : [];
 
-            // Coronal: vol[:][sy][:] -> X x Z
-            // We need to map row by row
             const corSlice = vol.map((row) => (sy < row.length ? row[sy] : []));
 
-            // Axial: vol[:][:][sz] -> X x Y
             const axSlice = vol.map((row) =>
                 row.map((col) => (sz < col.length ? col[sz] : 0)),
             );
 
-            // dims originales (avant orientation)
             const sagH = sagSlice?.length ?? 0;
             const sagW = sagSlice?.[0]?.length ?? 0;
 
@@ -634,7 +590,6 @@ function App() {
             const axH = axSlice?.length ?? 0;
             const axW = axSlice?.[0]?.length ?? 0;
 
-            // ✅ slices orientées + dims affichées (après orientation)
             const sagOriented = orient2D(sagSlice, orientIRM.sagittal);
             const sagDispH = sagOriented?.length ?? 0;
             const sagDispW = sagOriented?.[0]?.length ?? 0;
@@ -678,7 +633,6 @@ function App() {
                                 data={sagOriented}
                                 title={`Sagittal (X=${sliceIndices.sagittal})`}
                                 onClick={(xDisp, yDisp) => {
-                                    // ✅ on inverse avec les dims AFFICHÉES
                                     const p = inversePoint(
                                         xDisp,
                                         yDisp,
@@ -686,14 +640,12 @@ function App() {
                                         sagDispH,
                                         orientIRM.sagittal,
                                     );
-                                    // Fix: p.y is Y (row), p.x is Z (col)
                                     handleSagittalClick(p.y, p.x);
                                 }}
                                 crosshair={crosshairXY(
                                     "sagittal",
                                     sagW,
                                     sagH,
-                                    // Fix: Horizontal is Z, Vertical is Y
                                     cursor3D?.z,
                                     cursor3D?.y,
                                 )}
@@ -719,7 +671,6 @@ function App() {
                                 data={corOriented}
                                 title={`Coronal (Y=${sliceIndices.coronal})`}
                                 onClick={(xDisp, yDisp) => {
-                                    // ✅ on inverse avec les dims AFFICHÉES
                                     const p = inversePoint(
                                         xDisp,
                                         yDisp,
@@ -727,14 +678,12 @@ function App() {
                                         corDispH,
                                         orientIRM.coronal,
                                     );
-                                    // Fix: p.y is X (row), p.x is Z (col)
                                     handleCoronalClick(p.y, p.x);
                                 }}
                                 crosshair={crosshairXY(
                                     "coronal",
                                     corW,
                                     corH,
-                                    // Fix: Horizontal is Z, Vertical is X
                                     cursor3D?.z,
                                     cursor3D?.x,
                                 )}
@@ -760,7 +709,6 @@ function App() {
                                 data={axOriented}
                                 title={`Axial (Z=${sliceIndices.axial})`}
                                 onClick={(xDisp, yDisp) => {
-                                    // ✅ on inverse avec les dims AFFICHÉES
                                     const p = inversePoint(
                                         xDisp,
                                         yDisp,
@@ -768,14 +716,12 @@ function App() {
                                         axDispH,
                                         orientIRM.axial,
                                     );
-                                    // Fix: p.y is X (row), p.x is Y (col)
                                     handleAxialClick(p.y, p.x);
                                 }}
                                 crosshair={crosshairXY(
                                     "axial",
                                     axW,
                                     axH,
-                                    // Fix: Horizontal is Y, Vertical is X
                                     cursor3D?.y,
                                     cursor3D?.x,
                                 )}
@@ -795,7 +741,6 @@ function App() {
                             />
                         </div>
 
-                        {/* 4. 3D Brain View */}
                         <div
                             className="slice-control"
                             style={{
@@ -961,21 +906,6 @@ function App() {
                         <span>👤 Patients</span>
                     </div>
 
-                    <div
-                        className={`nav-item ${view === "fusion" ? "active" : ""} ${!irmResults || !mrsiResults ? "disabled" : ""}`}
-                        onClick={() => {
-                            if (irmResults && mrsiResults) setView("fusion");
-                        }}
-                        style={{
-                            opacity: !irmResults || !mrsiResults ? 0.5 : 1,
-                            cursor:
-                                !irmResults || !mrsiResults
-                                    ? "not-allowed"
-                                    : "pointer",
-                        }}
-                    >
-                        <span>🔮 Fusion</span>
-                    </div>
                 </nav>
 
                 <div className="sidebar-footer">
@@ -1045,13 +975,7 @@ function App() {
                         {renderResults(mrsiResults)}
                     </>
                 )}
-                {view === "fusion" && (
-                    <FusionViewer
-                        irmData={irmResults}
-                        mrsiData={mrsiResults}
-                        fetchSpectrum={(x, y, z) => fetchSpectrum(x, y, z)}
-                    />
-                )}
+
                 {view === "patients" && <PatientsExplorer />}
             </div>
         </div>

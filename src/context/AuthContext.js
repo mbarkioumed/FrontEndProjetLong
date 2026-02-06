@@ -9,9 +9,7 @@ export const AuthProvider = ({ children }) => {
 
     useEffect(() => {
         if (token) {
-            // Optional: Validate token with backend or decode it
-            // For now, we trust presence of token, or let backend reject requests
-            setUser({ username: "User" }); // Placeholder
+            setUser({ username: "User" });
         }
         setLoading(false);
     }, [token]);
