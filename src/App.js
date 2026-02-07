@@ -10,6 +10,9 @@ import SpectrumModal from "./components/SpectrumModal";
 import SpectrumChart from "./components/SpectrumChart";
 import PatientsExplorer from "./components/PatientsExplorer";
 
+import { api } from "./api/client";
+
+
 const API_URL = "http://127.0.0.1:8000";
 
 // ===============================
@@ -53,7 +56,7 @@ const inversePoint = (x, y, width, height, o = {}) => {
     // Inverse rotation
     if (o.rotate === 180) {
         px = w - 1 - px;
-        py = h - 1 - py;
+        py = h- 1 - py;
     } else if (o.rotate === 90) {
         // inverse d'un 90° CW = 90° CCW
         const nx = py;
@@ -296,6 +299,56 @@ function App() {
             setLoading(false);
         }
     };
+    const openExamFromPatients = async ({ irmFiles, mrsiFile, meta }) => {
+  setLoading(true);
+  setError("");
+
+  try {
+    // 1) Choisir une IRM par défaut
+    const irmFile = irmFiles && irmFiles.length ? irmFiles[0] : null;
+
+    if (irmFile) {
+      const irmData = await api.uploadIRMFile(irmFile, token);
+      setIrmResults(irmData);
+      setReference3DData(irmData);
+
+      // init slices center
+      setSliceIndices((prev) => ({
+        ...prev,
+        sagittal: Math.floor(irmData.shape[0] / 2),
+        coronal: Math.floor(irmData.shape[1] / 2),
+        axial: Math.floor(irmData.shape[2] / 2),
+      }));
+      setCursor3D({
+        x: Math.floor(irmData.shape[0] / 2),
+        y: Math.floor(irmData.shape[1] / 2),
+        z: Math.floor(irmData.shape[2] / 2),
+      });
+    }
+
+    if (mrsiFile) {
+      const mrsiData = await api.uploadMRSIFile(mrsiFile, token);
+      setMrsiResults(mrsiData);
+      setSliceIndices((prev) => ({
+        ...prev,
+        mrsi: Math.floor(mrsiData.shape[2] / 2),
+      }));
+      setSelectedVoxel(null);
+      setCurrentSpectrum(null);
+    }
+
+    // 2) Aller à la vue fusion si possible, sinon IRM
+    if (irmFile && mrsiFile) setView("fusion");
+    else if (irmFile) setView("irm");
+    else if (mrsiFile) setView("mrsi");
+    else setView("patients");
+  } catch (e) {
+    setError(`Ouverture examen impossible : ${e.message}`);
+  } finally {
+    setLoading(false);
+  }
+};
+
 
 
 
@@ -1023,7 +1076,8 @@ function App() {
                      />
                 )}
 
-                {view === "patients" && <PatientsExplorer />}
+                {view === "patients" && <PatientsExplorer onOpenExam={openExamFromPatients} />};
+
 
                 {currentSpectrum && (
                     <SpectrumModal 

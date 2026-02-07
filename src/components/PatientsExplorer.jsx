@@ -1,663 +1,356 @@
-import React, { useMemo, useState, useContext } from "react";
-import { api } from "../api/client";
+import React, { useContext, useMemo, useState } from "react";
 import AuthContext from "../context/AuthContext";
+import { api } from "../api/client";
 
-export default function PatientsExplorer() {
-    const { token } = useContext(AuthContext);
-    // ===============================
-    // State
-    // ===============================
-    const [raw, setRaw] = useState(""); // textarea JSON
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState("");
+/**
+ * PatientsExplorer
+ * Props:
+ *  - onOpenExam: ({ irmFiles: File[], mrsiFile: File|null, meta: {...} }) => Promise<void>
+ */
+export default function PatientsExplorer({ onOpenExam }) {
+  const { token } = useContext(AuthContext);
 
-    const [result, setResult] = useState(null); // JSON retour backend
-    const [query, setQuery] = useState("");
-    const [fileQuery, setFileQuery] = useState("");
-    const [selectedPatientId, setSelectedPatientId] = useState(null);
-    const [selectedExamIdx, setSelectedExamIdx] = useState(0);
-    const [showRawExam, setShowRawExam] = useState(false);
+  const [raw, setRaw] = useState(""); // debug JSON visible
+  const [datasetJson, setDatasetJson] = useState(null);
+  const [fileMap, setFileMap] = useState({}); // relativePath -> File
+  const [patientsTree, setPatientsTree] = useState(null);
 
-    // ===============================
-    // Helpers robustes
-    // ===============================
-    const getPatientId = (p) => p?.patient_id ?? p?.patientId ?? p?.id ?? "";
-    const getExams = (p) => p?.analyses ?? p?.exams ?? p?.examens ?? [];
-    const getExamLabel = (ex, idx) =>
-        ex?.date ??
-        ex?.exam_date ??
-        ex?.analysisDate ??
-        ex?.examDate ??
-        `Examen #${idx + 1}`;
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
 
-    const getFilesByModality = (exam) => {
-        if (!exam) return {};
-        const fbm = exam.files_by_modality || exam.filesByModality;
-        if (fbm && typeof fbm === "object") return fbm;
+  // ---------- helpers ----------
+  const isNifti = (name = "") =>
+    name.toLowerCase().endsWith(".nii") || name.toLowerCase().endsWith(".nii.gz");
 
-        // fallback: exam.files = [{name, relativePath, modality?}] ou liste de strings
-        const files = exam.files || [];
-        const out = {};
-        (Array.isArray(files) ? files : [files]).forEach((f) => {
-            const mod = (f?.modality || f?.type || "FILES")
-                .toString()
-                .toUpperCase();
-            const item = f?.relativePath || f?.path || f?.name || String(f);
-            out[mod] = out[mod] || [];
-            out[mod].push(item);
-        });
-        return out;
-    };
+  const normalizeRelPath = (p = "") => p.replaceAll("\\", "/");
 
-    const countAllFiles = (filesByModality) =>
-        Object.values(filesByModality || {}).reduce(
-            (acc, v) => acc + (Array.isArray(v) ? v.length : 1),
-            0,
-        );
+  const buildDatasetFromFolderFiles = (filesList) => {
+    const files = Array.from(filesList || []);
+    if (!files.length) return { dataset: null, map: {} };
 
-    // Stats patient (petit résumé “pro” dans la liste)
-    const patientStats = (p) => {
-        const exams = getExams(p);
-        let files = 0;
-        exams.forEach((ex) => {
-            files += countAllFiles(getFilesByModality(ex));
-        });
-        return { exams: exams.length, files };
-    };
+    // root folder = first segment of webkitRelativePath
+    const firstPath = files[0].webkitRelativePath || "";
+    const rootFolder = normalizeRelPath(firstPath).split("/")[0] || "Dataset";
 
-    // ===============================
-    // Derived data
-    // ===============================
-    const patients = useMemo(() => {
-        const p = result?.patients ?? result;
-        return Array.isArray(p) ? p : [];
-    }, [result]);
+    const map = {};
+    const entries = [];
 
-    const filteredPatients = useMemo(() => {
-        const q = query.trim().toLowerCase();
-        if (!q) return patients;
-        return patients.filter((p) =>
-            String(getPatientId(p)).toLowerCase().includes(q),
-        );
-    }, [patients, query]);
+    for (const f of files) {
+      const rel = normalizeRelPath(f.webkitRelativePath || f.name);
+      if (!rel) continue;
+      if (!isNifti(f.name)) continue;
 
-    const selectedPatient = useMemo(() => {
-        if (!selectedPatientId) return null;
-        return (
-            patients.find((p) => getPatientId(p) === selectedPatientId) || null
-        );
-    }, [patients, selectedPatientId]);
+      map[rel] = f;
+      entries.push({
+        name: f.name,
+        relativePath: rel,
+      });
+    }
 
-    const exams = useMemo(() => getExams(selectedPatient), [selectedPatient]);
+    const dataset = { rootFolder, files: entries };
+    return { dataset, map };
+  };
 
-    const selectedExam = useMemo(() => {
-        if (!selectedPatient) return null;
-        if (!exams.length) return null;
-        const idx = Math.max(
-            0,
-            Math.min(selectedExamIdx ?? 0, exams.length - 1),
-        );
-        return exams[idx] || null;
-    }, [selectedPatient, exams, selectedExamIdx]);
+  // backend response variants -> unify
+  const normalizeBackendTree = (data) => {
+    // expected: {patients:[...]} but might be direct list
+    const patients = data?.patients || data?.Patients || data || [];
+    if (!Array.isArray(patients)) return [];
 
-    const filesByModality = useMemo(
-        () => getFilesByModality(selectedExam),
-        [selectedExam],
-    );
+    return patients.map((p) => {
+      const patientId = p.patientId || p.patient_id || p.id || "Unknown";
+      const analyses = p.analyses || p.exams || p.examens || [];
+      const exams = Array.isArray(analyses) ? analyses : [];
 
-    const totalFiles = useMemo(
-        () => countAllFiles(filesByModality),
-        [filesByModality],
-    );
+      const normalizedExams = exams.map((ex) => {
+        const date = ex.date || ex.acquisition_date || ex.day || "Unknown date";
+        const files = ex.files || ex.fichiers || [];
+        const normFiles = (Array.isArray(files) ? files : []).map((f) => ({
+          relative_path: f.relative_path || f.relativePath || f.path || f.rel || "",
+          type_analyse: f.type_analyse || f.type || f.modality || "",
+          modalites_IRM: f.modalites_IRM || f.modalite || f.mri_modality || null,
+          name: f.name || f.nom || "",
+        }));
+        return { date, files: normFiles };
+      });
 
-    const modalities = useMemo(
-        () => Object.keys(filesByModality || {}),
-        [filesByModality],
-    );
+      return { patientId, analyses: normalizedExams };
+    });
+  };
 
-    // ===============================
-    // Actions
-    // ===============================
-    const tryParseJson = () => {
-        setError("");
-        if (!raw.trim())
-            throw new Error("Colle un JSON dataset dans la zone de texte.");
-        try {
-            return JSON.parse(raw);
-        } catch {
-            throw new Error(
-                "JSON invalide. Vérifie les virgules / guillemets / accolades.",
-            );
-        }
-    };
+  const normalizedPatients = useMemo(
+    () => (patientsTree ? normalizeBackendTree(patientsTree) : []),
+    [patientsTree]
+  );
 
-    const onSend = async () => {
-        setError("");
-        setShowRawExam(false);
-        setSelectedPatientId(null);
-        setSelectedExamIdx(0);
+  // ---------- UI handlers ----------
+  const handleFolderPick = (e) => {
+    setErr("");
+    const picked = e.target.files;
 
-        let payload;
-        try {
-            payload = tryParseJson();
-        } catch (e) {
-            setError(e.message);
-            return;
-        }
+    // Note: webkitdirectory is Chrome/Edge. If missing, no relative path.
+    const hasRel = picked && picked.length && picked[0].webkitRelativePath;
+    if (!hasRel) {
+      setErr(
+        "Sélection de dossier non supportée ici. Utilise Chrome/Edge, ou colle un JSON de debug."
+      );
+      return;
+    }
 
-        setLoading(true);
-        try {
-            const res = await api.uploadJsonDataset(payload, token);
-            setResult(res);
+    const { dataset, map } = buildDatasetFromFolderFiles(picked);
+    if (!dataset || dataset.files.length === 0) {
+      setErr("Aucun fichier NIfTI (.nii / .nii.gz) trouvé dans ce dossier.");
+      return;
+    }
 
-            const p = res?.patients ?? res;
-            if (Array.isArray(p) && p.length > 0) {
-                setSelectedPatientId(getPatientId(p[0]));
-                setSelectedExamIdx(0);
-            }
-        } catch (e) {
-            setError(e.message || "Erreur inconnue");
-        } finally {
-            setLoading(false);
-        }
-    };
+    setDatasetJson(dataset);
+    setFileMap(map);
+    const pretty = JSON.stringify(dataset, null, 2);
+    setRaw(pretty);
+  };
 
-    const onUploadFile = async (file) => {
-        setError("");
-        if (!file) return;
-        try {
-            const txt = await file.text();
-            setRaw(txt);
-        } catch {
-            setError("Impossible de lire le fichier JSON.");
-        }
-    };
+  const handleSendDataset = async () => {
+    setErr("");
+    setLoading(true);
+    try {
+      let payload = datasetJson;
 
-    // ===============================
-    // UI small styles (inline)
-    // ===============================
-    const pillStyle = {
-        padding: "6px 10px",
-        borderRadius: 999,
-        border: "1px solid var(--border-color)",
-        background: "var(--panel-bg)",
-        fontSize: 12,
-        color: "var(--text-muted)",
-        display: "inline-flex",
-        gap: 8,
-        alignItems: "center",
-    };
+      // fallback debug: if user pasted json manually
+      if (!payload && raw?.trim()) {
+        payload = JSON.parse(raw);
+      }
+      if (!payload) throw new Error("Aucun dataset JSON disponible.");
 
-    // ===============================
-    // Render
-    // ===============================
-    return (
-        <div className="card">
-            <h2>👤 Patients / Dataset Tool</h2>
-            <p style={{ color: "var(--text-muted)" }}>
-                Importe un JSON dataset, envoie-le au backend (POST
-                /upload-json-dataset/), puis explore la structure{" "}
-                <strong>patient → examens → fichiers</strong>.
-            </p>
+      const data = await api.uploadJsonDataset(payload, token);
+      setPatientsTree(data);
+    } catch (e) {
+      setErr(e.message || "Erreur inconnue");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-            {/* Upload / textarea */}
-            <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
-                <div
-                    style={{
-                        display: "flex",
-                        gap: 10,
-                        flexWrap: "wrap",
-                        alignItems: "center",
-                    }}
-                >
-                    <input
-                        type="file"
-                        accept="application/json,.json"
-                        onChange={(e) => onUploadFile(e.target.files?.[0])}
-                    />
-                    <button
-                        className="btn-primary"
-                        disabled={loading}
-                        onClick={onSend}
-                    >
-                        {loading ? "Traitement..." : "Envoyer au backend"}
-                    </button>
-                    {error && (
-                        <span style={{ color: "crimson" }}>❌ {error}</span>
-                    )}
-                </div>
+  const pickExamFiles = (exam) => {
+    // exam.files contains relative_path + type_analyse
+    const irm = [];
+    let mrsi = null;
 
-                <textarea
-                    value={raw}
-                    onChange={(e) => setRaw(e.target.value)}
-                    placeholder="Colle ici ton JSON dataset"
-                    style={{
-                        width: "100%",
-                        minHeight: 160,
-                        fontFamily: "monospace",
-                        fontSize: 12,
-                        padding: 12,
-                        borderRadius: 10,
-                        border: "1px solid var(--border-color)",
-                        background: "var(--input-bg)",
-                        color: "var(--text-main)",
-                    }}
-                />
+    for (const f of exam.files || []) {
+      const rel = f.relative_path;
+      const type = (f.type_analyse || "").toUpperCase();
+
+      if (!rel) continue;
+      const fileObj = fileMap[rel];
+      if (!fileObj) continue; // if not from folder selection
+
+      if (type.includes("IRM")) irm.push(fileObj);
+      if (type.includes("MRSI")) mrsi = fileObj;
+    }
+
+    // If backend doesn't include type_analyse reliably,
+    // fallback guess by filename:
+    if (irm.length === 0 || !mrsi) {
+      for (const f of exam.files || []) {
+        const rel = f.relative_path;
+        const fileObj = fileMap[rel];
+        if (!fileObj) continue;
+        const n = fileObj.name.toLowerCase();
+        if (n.includes("mrsi")) mrsi = mrsi || fileObj;
+        else irm.push(fileObj);
+      }
+    }
+
+    return { irmFiles: irm, mrsiFile: mrsi };
+  };
+
+  const handleOpenExam = async (patientId, date, exam) => {
+    setErr("");
+    if (!onOpenExam) {
+      setErr("onOpenExam non fourni par App.js");
+      return;
+    }
+    if (!Object.keys(fileMap).length) {
+      setErr(
+        "Pour ouvrir automatiquement un examen, il faut sélectionner un dossier (sinon le front n'a pas accès aux fichiers)."
+      );
+      return;
+    }
+
+    const { irmFiles, mrsiFile } = pickExamFiles(exam);
+
+    if (!irmFiles.length && !mrsiFile) {
+      setErr("Impossible de retrouver les fichiers sur ton disque (fileMap vide ou chemins différents).");
+      return;
+    }
+
+    await onOpenExam({
+      irmFiles,
+      mrsiFile,
+      meta: { patientId, date, exam },
+    });
+  };
+
+  // ---------- render ----------
+  return (
+    <div className="card">
+      <h2>👤 Patients</h2>
+
+      <div style={{ marginTop: "0.75rem" }}>
+        <label style={{ display: "block", marginBottom: 6, fontWeight: 600 }}>
+          1) Choisir un dossier dataset (Chrome/Edge)
+        </label>
+
+        <input
+          type="file"
+          webkitdirectory="true"
+          directory="true"
+          multiple
+          onChange={handleFolderPick}
+          style={{ display: "block", marginBottom: 10 }}
+        />
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            className="btn-primary"
+            onClick={handleSendDataset}
+            disabled={loading || (!datasetJson && !raw.trim())}
+          >
+            {loading ? "Envoi..." : "2) Envoyer au backend"}
+          </button>
+
+          <button
+            className="btn-primary"
+            onClick={() => {
+              setRaw("");
+              setDatasetJson(null);
+              setPatientsTree(null);
+              setFileMap({});
+              setErr("");
+            }}
+            disabled={loading}
+          >
+            Réinitialiser
+          </button>
+        </div>
+
+        <p style={{ marginTop: 10, color: "var(--text-muted)", fontSize: "0.85rem" }}>
+          Debug : le JSON généré est affiché ci-dessous. Tu peux aussi coller un JSON ici si besoin.
+        </p>
+
+        <textarea
+          value={raw}
+          onChange={(e) => setRaw(e.target.value)}
+          placeholder="JSON dataset (debug)"
+          style={{
+            width: "100%",
+            minHeight: 140,
+            fontFamily: "monospace",
+            padding: 10,
+            borderRadius: 10,
+            border: "1px solid var(--border-color)",
+            background: "var(--card-bg)",
+            color: "var(--text-color)",
+          }}
+        />
+      </div>
+
+      {err && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: "0.75rem 1rem",
+            borderRadius: 10,
+            borderLeft: "4px solid var(--danger)",
+            color: "var(--danger)",
+          }}
+        >
+          {err}
+        </div>
+      )}
+
+      {/* Patients tree */}
+      <div style={{ marginTop: 16 }}>
+        {!patientsTree && (
+          <div style={{ color: "var(--text-muted)" }}>
+            Aucun patient chargé pour l’instant. Sélectionne un dossier puis “Envoyer”.
+          </div>
+        )}
+
+        {patientsTree && normalizedPatients.length === 0 && (
+          <div style={{ color: "var(--text-muted)" }}>
+            Réponse backend reçue, mais structure inattendue.
+          </div>
+        )}
+
+        {normalizedPatients.map((p) => (
+          <div
+            key={p.patientId}
+            style={{
+              marginTop: 12,
+              padding: 12,
+              borderRadius: 12,
+              border: "1px solid var(--border-color)",
+              background: "var(--card-bg)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <strong>Patient: {p.patientId}</strong>
+              <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                {p.analyses.length} examen(s)
+              </span>
             </div>
 
-            {/* Résultats */}
-            {patients.length > 0 && (
+            <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+              {p.analyses.map((ex, idx) => (
                 <div
-                    style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 2fr",
-                        gap: 16,
-                        marginTop: 16,
-                    }}
+                  key={`${p.patientId}-${ex.date}-${idx}`}
+                  style={{
+                    padding: 10,
+                    borderRadius: 10,
+                    background: "rgba(255,255,255,0.02)",
+                    border: "1px solid var(--border-color)",
+                  }}
                 >
-                    {/* Col gauche : liste patients */}
-                    <div
-                        style={{
-                            border: "1px solid var(--border-color)",
-                            borderRadius: 12,
-                            padding: 12,
-                            background: "var(--card-bg)",
-                        }}
-                    >
-                        <div
-                            style={{
-                                display: "flex",
-                                gap: 8,
-                                alignItems: "center",
-                                marginBottom: 10,
-                            }}
-                        >
-                            <strong>Patients</strong>
-                            <span style={{ color: "var(--text-muted)" }}>
-                                ({filteredPatients.length})
-                            </span>
-                        </div>
-
-                        <input
-                            value={query}
-                            onChange={(e) => setQuery(e.target.value)}
-                            placeholder="Rechercher patient id..."
-                            style={{
-                                width: "100%",
-                                padding: "8px 10px",
-                                borderRadius: 10,
-                                border: "1px solid var(--border-color)",
-                                marginBottom: 10,
-                                background: "var(--input-bg)",
-                                color: "var(--text-main)",
-                            }}
-                        />
-
-                        <div
-                            style={{
-                                maxHeight: 380,
-                                overflow: "auto",
-                                display: "grid",
-                                gap: 8,
-                            }}
-                        >
-                            {filteredPatients.map((p, idx) => {
-                                const pid =
-                                    getPatientId(p) || `patient_${idx + 1}`;
-                                const active = pid === selectedPatientId;
-                                const stats = patientStats(p);
-
-                                return (
-                                    <div
-                                        key={pid}
-                                        onClick={() => {
-                                            setSelectedPatientId(pid);
-                                            setSelectedExamIdx(0);
-                                            setFileQuery("");
-                                            setShowRawExam(false);
-                                        }}
-                                        style={{
-                                            cursor: "pointer",
-                                            padding: "10px 10px",
-                                            borderRadius: 12,
-                                            border: active
-                                                ? "1px solid #94a3b8"
-                                                : "1px solid var(--border-color)",
-                                            background: active
-                                                ? "var(--panel-bg)"
-                                                : "var(--card-bg)",
-                                            display: "grid",
-                                            gap: 4,
-                                        }}
-                                    >
-                                        <div
-                                            style={{
-                                                display: "flex",
-                                                justifyContent: "space-between",
-                                                gap: 10,
-                                            }}
-                                        >
-                                            <strong
-                                                style={{
-                                                    overflow: "hidden",
-                                                    textOverflow: "ellipsis",
-                                                }}
-                                            >
-                                                {pid}
-                                            </strong>
-                                            <span
-                                                style={{
-                                                    color: "var(--text-muted)",
-                                                    fontSize: 12,
-                                                }}
-                                            >
-                                                {stats.exams} ex.
-                                            </span>
-                                        </div>
-                                        <div
-                                            style={{
-                                                color: "var(--text-muted)",
-                                                fontSize: 12,
-                                            }}
-                                        >
-                                            {stats.files} fichiers
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <div>
+                      <strong>Date: {ex.date}</strong>
+                      <div style={{ marginTop: 4, color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                        {ex.files.length} fichier(s)
+                      </div>
                     </div>
 
-                    {/* Col droite : détails */}
-                    <div
-                        style={{
-                            border: "1px solid var(--border-color)",
-                            borderRadius: 12,
-                            padding: 12,
-                            background: "var(--card-bg)",
-                        }}
+                    <button
+                      className="btn-primary"
+                      onClick={() => handleOpenExam(p.patientId, ex.date, ex)}
+                      disabled={loading}
                     >
-                        {!selectedPatient ? (
-                            <p style={{ color: "var(--text-muted)" }}>
-                                Sélectionne un patient pour voir ses examens.
-                            </p>
-                        ) : exams.length === 0 ? (
-                            <p style={{ color: "var(--text-muted)" }}>
-                                Aucun examen détecté pour ce patient.
-                            </p>
-                        ) : (
-                            <>
-                                {/* Header patient + choix examen */}
-                                <div
-                                    style={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        gap: 12,
-                                        flexWrap: "wrap",
-                                    }}
-                                >
-                                    <div>
-                                        <h3 style={{ margin: 0 }}>
-                                            Patient:{" "}
-                                            {getPatientId(selectedPatient)}
-                                        </h3>
-                                        <p
-                                            style={{
-                                                margin: "6px 0 0",
-                                                color: "var(--text-muted)",
-                                            }}
-                                        >
-                                            Examens: {exams.length}
-                                        </p>
-                                    </div>
+                      Ouvrir cet examen
+                    </button>
+                  </div>
 
-                                    <div
-                                        style={{
-                                            display: "flex",
-                                            gap: 8,
-                                            alignItems: "center",
-                                        }}
-                                    >
-                                        <span
-                                            style={{
-                                                color: "var(--text-muted)",
-                                            }}
-                                        >
-                                            Examen:
-                                        </span>
-                                        <select
-                                            value={selectedExamIdx ?? 0}
-                                            onChange={(e) => {
-                                                setSelectedExamIdx(
-                                                    parseInt(
-                                                        e.target.value,
-                                                        10,
-                                                    ),
-                                                );
-                                                setFileQuery("");
-                                                setShowRawExam(false);
-                                            }}
-                                            className="form-select"
-                                        >
-                                            {exams.map((ex, idx) => (
-                                                <option key={idx} value={idx}>
-                                                    {getExamLabel(ex, idx)}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                </div>
+                  <div style={{ marginTop: 8, fontFamily: "monospace", fontSize: "0.82rem" }}>
+                    {ex.files.map((f, j) => (
+                      <div key={`${f.relative_path}-${j}`} style={{ opacity: 0.95 }}>
+                        • {f.type_analyse || "?"}{" "}
+                        {f.modalites_IRM ? `(mod: ${f.modalites_IRM})` : ""} —{" "}
+                        <span style={{ color: "var(--text-muted)" }}>{f.relative_path || f.name}</span>
+                      </div>
+                    ))}
+                  </div>
 
-                                {/* Résumé */}
-                                <div style={{ marginTop: 12 }}>
-                                    <strong>Résumé</strong>
-                                    <div
-                                        style={{
-                                            display: "flex",
-                                            gap: 10,
-                                            flexWrap: "wrap",
-                                            marginTop: 8,
-                                        }}
-                                    >
-                                        <div style={pillStyle}>
-                                            📅{" "}
-                                            {getExamLabel(
-                                                selectedExam,
-                                                selectedExamIdx ?? 0,
-                                            )}
-                                        </div>
-                                        <div style={pillStyle}>
-                                            🧾 {totalFiles} fichiers
-                                        </div>
-                                        <div style={pillStyle}>
-                                            🧠 {modalities.length} modalités
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Fichiers */}
-                                <div style={{ marginTop: 14 }}>
-                                    <strong>Fichiers</strong>
-
-                                    <input
-                                        value={fileQuery}
-                                        onChange={(e) =>
-                                            setFileQuery(e.target.value)
-                                        }
-                                        placeholder="Filtrer par nom / path..."
-                                        style={{
-                                            width: "100%",
-                                            padding: "8px 10px",
-                                            borderRadius: 10,
-                                            border: "1px solid var(--border-color)",
-                                            marginTop: 8,
-                                            marginBottom: 10,
-                                            background: "var(--input-bg)",
-                                            color: "var(--text-main)",
-                                        }}
-                                    />
-
-                                    <div style={{ display: "grid", gap: 10 }}>
-                                        {Object.entries(filesByModality).map(
-                                            ([mod, files]) => {
-                                                const list = (
-                                                    Array.isArray(files)
-                                                        ? files
-                                                        : [files]
-                                                ).map(String);
-                                                const q = fileQuery
-                                                    .trim()
-                                                    .toLowerCase();
-                                                const filtered = q
-                                                    ? list.filter((s) =>
-                                                          s
-                                                              .toLowerCase()
-                                                              .includes(q),
-                                                      )
-                                                    : list;
-
-                                                if (filtered.length === 0)
-                                                    return null;
-
-                                                return (
-                                                    <div
-                                                        key={mod}
-                                                        style={{
-                                                            border: "1px solid var(--border-color)",
-                                                            borderRadius: 12,
-                                                            padding: 10,
-                                                        }}
-                                                    >
-                                                        <div
-                                                            style={{
-                                                                display: "flex",
-                                                                justifyContent:
-                                                                    "space-between",
-                                                                gap: 10,
-                                                            }}
-                                                        >
-                                                            <strong>
-                                                                {mod}
-                                                            </strong>
-                                                            <span
-                                                                style={{
-                                                                    color: "var(--text-muted)",
-                                                                    fontSize: 12,
-                                                                }}
-                                                            >
-                                                                {
-                                                                    filtered.length
-                                                                }{" "}
-                                                                fichier(s)
-                                                            </span>
-                                                        </div>
-
-                                                        <div
-                                                            style={{
-                                                                marginTop: 8,
-                                                                display: "grid",
-                                                                gap: 6,
-                                                            }}
-                                                        >
-                                                            {filtered.map(
-                                                                (s, i) => (
-                                                                    <div
-                                                                        key={i}
-                                                                        style={{
-                                                                            padding:
-                                                                                "6px 8px",
-                                                                            borderRadius: 10,
-                                                                            background:
-                                                                                "var(--panel-bg)",
-                                                                            border: "1px solid var(--border-color)",
-                                                                            fontFamily:
-                                                                                "monospace",
-                                                                            fontSize: 12,
-                                                                            overflow:
-                                                                                "hidden",
-                                                                            textOverflow:
-                                                                                "ellipsis",
-                                                                        }}
-                                                                        title={
-                                                                            s
-                                                                        }
-                                                                    >
-                                                                        {s}
-                                                                    </div>
-                                                                ),
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            },
-                                        )}
-
-                                        {modalities.length === 0 && (
-                                            <p
-                                                style={{
-                                                    color: "var(--text-muted)",
-                                                    margin: 0,
-                                                }}
-                                            >
-                                                Aucune modalité / fichier
-                                                détecté pour cet examen.
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* JSON brut (optionnel) */}
-                                <div
-                                    style={{
-                                        marginTop: 14,
-                                        display: "flex",
-                                        gap: 10,
-                                        flexWrap: "wrap",
-                                    }}
-                                >
-                                    <button
-                                        className="btn-primary"
-                                        onClick={() =>
-                                            setShowRawExam((v) => !v)
-                                        }
-                                    >
-                                        {showRawExam
-                                            ? "Masquer JSON brut"
-                                            : "Afficher JSON brut"}
-                                    </button>
-                                </div>
-
-                                {showRawExam && (
-                                    <pre
-                                        style={{
-                                            marginTop: 10,
-                                            background: "var(--panel-bg)",
-                                            padding: 10,
-                                            borderRadius: 12,
-                                            border: "1px solid var(--border-color)",
-                                            overflow: "auto",
-                                            fontSize: 12,
-                                            whiteSpace: "pre-wrap",
-                                        }}
-                                    >
-                                        {JSON.stringify(selectedExam, null, 2)}
-                                    </pre>
-                                )}
-                            </>
-                        )}
+                  {/* warning if fileMap cannot locate */}
+                  {Object.keys(fileMap).length > 0 && ex.files.some((f) => f.relative_path && !fileMap[f.relative_path]) && (
+                    <div style={{ marginTop: 8, color: "var(--text-muted)", fontSize: "0.8rem" }}>
+                      ⚠️ Certains chemins renvoyés par le backend ne matchent pas ceux du navigateur (relative_path).
+                      Vérifie que le backend renvoie bien les mêmes `relativePath` que `webkitRelativePath`.
                     </div>
+                  )}
                 </div>
-            )}
-
-            {result && patients.length === 0 && (
-                <div style={{ marginTop: 12, color: "crimson" }}>
-                    Le backend a répondu, mais je ne reconnais pas la structure
-                    `patients`. Voici la réponse brute :
-                    <pre style={{ whiteSpace: "pre-wrap" }}>
-                        {JSON.stringify(result, null, 2)}
-                    </pre>
-                </div>
-            )}
-        </div>
-    );
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
