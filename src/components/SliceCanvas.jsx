@@ -25,13 +25,17 @@ const SliceCanvas = ({
     onClick,
     selectedVoxel,
     isMRSI,
+<<<<<<< HEAD
     // Overlay data
     overlay,
     opacity = 0.5,
+=======
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
     crosshair,
 }) => {
     const canvasRef = useRef(null);
 
+<<<<<<< HEAD
     // Simple Jet colormap
     const getJetColor = (v) => {
         const x = v / 255;
@@ -46,6 +50,8 @@ const SliceCanvas = ({
         return [r * 255, g * 255, b * 255];
     };
 
+=======
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
     useEffect(() => {
         if (!canvasRef.current || !data) return;
 
@@ -57,7 +63,10 @@ const SliceCanvas = ({
         canvas.width = width;
         canvas.height = height;
 
+<<<<<<< HEAD
         // 1. Draw Base MRI
+=======
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
         const imgData = ctx.createImageData(width, height);
         for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
@@ -71,6 +80,7 @@ const SliceCanvas = ({
         }
         ctx.putImageData(imgData, 0, 0);
 
+<<<<<<< HEAD
         // 2. Draw Overlay if present
         if (overlay && overlay.length > 0) {
             const oHeight = overlay.length;
@@ -118,13 +128,23 @@ const SliceCanvas = ({
             // But if we want to support markers, we need logical coords. 
             // For now, keep existing behavior:
              ctx.fillRect(selectedVoxel.x, selectedVoxel.y, 1, 1);
+=======
+        // MRSI marker (single voxel)
+        if (isMRSI && selectedVoxel) {
+            ctx.fillStyle = "#ff0000";
+            ctx.fillRect(selectedVoxel.x, selectedVoxel.y, 1, 1);
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
         }
 
         // IRM crosshair
         if (!isMRSI && crosshair) {
             drawCrosshair(ctx, crosshair.x, crosshair.y, width, height);
         }
+<<<<<<< HEAD
     }, [data, overlay, opacity, selectedVoxel, isMRSI, crosshair]);
+=======
+    }, [data, selectedVoxel, isMRSI, crosshair]);
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
 
     const handleClick = (e) => {
         if (!onClick || !canvasRef.current) return;

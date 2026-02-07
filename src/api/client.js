@@ -28,6 +28,7 @@ export const api = {
     if (!r.ok) throw new Error(data?.detail || `HTTP ${r.status}`);
     return data;
   },
+<<<<<<< HEAD
 
   runTreatment: async (catalog, token) => {
       const headers = { "Content-Type": "application/json" };
@@ -42,4 +43,6 @@ export const api = {
       if (!r.ok) throw new Error(data?.detail || `HTTP ${r.status}`);
       return data;
   }
+=======
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
 };

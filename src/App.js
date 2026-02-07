@@ -5,8 +5,11 @@ import AuthContext from "./context/AuthContext";
 import Login from "./components/Login";
 import SliceCanvas from "./components/SliceCanvas";
 import Fusion3D from "./components/Fusion3D"; // New 3D View import
+<<<<<<< HEAD
 import FusionViewer from "./components/FusionViewer";
 import SpectrumModal from "./components/SpectrumModal";
+=======
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
 import SpectrumChart from "./components/SpectrumChart";
 import PatientsExplorer from "./components/PatientsExplorer";
 
@@ -140,11 +143,19 @@ function App() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [irmResults, setIrmResults] = useState(null);
+<<<<<<< HEAD
     const [reference3DData, setReference3DData] = useState(null); // Stable data for 3D View
+=======
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
     const [mrsiResults, setMrsiResults] = useState(null);
     const [theme, setTheme] = useState(
         () => localStorage.getItem("theme") || "light",
     );
+<<<<<<< HEAD
+=======
+    const [irmSourceName, setIrmSourceName] = useState(null);
+
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
 
     // Navigation 3D
     const [sliceIndices, setSliceIndices] = useState({
@@ -266,7 +277,12 @@ function App() {
             // Initialisation des indices au centre pour l'IRM
             if (data.type === "IRM") {
                 setIrmResults(data);
+<<<<<<< HEAD
                 setReference3DData(data); // Initialize 3D view with original data
+=======
+                setIrmSourceName(data.nom_fichier); // ==> garde le vrai nom uploadé
+
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
                 setSliceIndices((prev) => ({
                     ...prev,
                     sagittal: Math.floor(data.shape[0] / 2),
@@ -297,6 +313,7 @@ function App() {
         }
     };
 
+<<<<<<< HEAD
 
 
 
@@ -373,11 +390,122 @@ function App() {
             }
         } catch (err) {
             setError(`Erreur FFT : ${err.message}`);
+=======
+        // ===============================
+    // MRSI: Fetch spectrum for voxel
+    // ===============================
+    const fetchSpectrum = async (x, y, zOverride = null) => {
+        const z = zOverride !== null ? zOverride : sliceIndices.mrsi;
+
+        const xi = parseInt(x, 10);
+        const yi = parseInt(y, 10);
+        const zi = parseInt(z, 10);
+
+        setSelectedVoxel({ x: xi, y: yi, z: zi });
+        setLoading(true);
+        setError("");
+
+        try {
+            const response = await fetch(`${API_URL}/spectrum/${xi}/${yi}/${zi}`, {
+                method: "GET",
+                headers: {
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+            });
+
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                throw new Error(data?.detail || data?.error || `Erreur ${response.status}`);
+            }
+
+            const spectrum = data?.spectrum ?? data;
+            setCurrentSpectrum(spectrum);
+            return spectrum;
+        } catch (err) {
+            setError(`Erreur spectre : ${err.message}`);
+            setCurrentSpectrum(null);
+            throw err;
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
         } finally {
             setLoading(false);
         }
     };
 
+<<<<<<< HEAD
+=======
+
+
+const runFftTraitement = async () => {
+  if (!irmResults?.nom_fichier) return;
+
+  setLoading(true);
+  setError("");
+
+  try {
+    const keyName = irmSourceName || irmResults.nom_fichier;
+
+    const payload = {
+      [keyName]: {
+        type_traitement: "fft",
+        params: { sigma: 20, filtre: true },
+      },
+    };
+
+    const response = await fetch(`${API_URL}/traitement/test_fft/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const rawText = await response.text();
+    let data = null;
+    try {
+      data = rawText ? JSON.parse(rawText) : null;
+    } catch {
+      data = rawText;
+    }
+
+    console.log("Expected key:", keyName);
+    console.log("FFT raw response:", data);
+
+    if (!response.ok) {
+      const msg =
+        (data && data.detail) ||
+        (data && data.error) ||
+        (typeof data === "string" ? data : null) ||
+        `Erreur ${response.status}`;
+      throw new Error(msg);
+    }
+
+    const next = data?.[keyName];
+    if (!next) throw new Error("Réponse FFT inattendue (clé fichier absente).");
+    if (next?.error) throw new Error(next.error);
+
+    setIrmResults(next);
+    setSliceIndices((prev) => ({
+      ...prev,
+      sagittal: Math.floor(next.shape[0] / 2),
+      coronal: Math.floor(next.shape[1] / 2),
+      axial: Math.floor(next.shape[2] / 2),
+    }));
+    setCursor3D({
+      x: Math.floor(next.shape[0] / 2),
+      y: Math.floor(next.shape[1] / 2),
+      z: Math.floor(next.shape[2] / 2),
+    });
+    setView("irm");
+  } catch (err) {
+    setError(`Erreur FFT : ${err?.message || "Erreur inconnue"}`);
+  } finally {
+    setLoading(false);
+  }
+};
+
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
     const renderHome = () => (
         <div className="card">
             <h2>Bienvenue sur Plateforme Cancer</h2>
@@ -795,7 +923,11 @@ function App() {
                                 }}
                             >
                                 <Fusion3D
+<<<<<<< HEAD
                                     irmData={reference3DData || results}
+=======
+                                    irmData={results}
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
                                     cursor3D={cursor3D}
                                 />
                             </div>
@@ -934,17 +1066,24 @@ function App() {
                         <span>📊 Upload MRSI</span>
                     </div>
                     <div
+<<<<<<< HEAD
                         className={`nav-item ${view === "fusion" ? "active" : ""}`}
                         onClick={() => setView("fusion")}
                     >
                         <span>🔬 Test Fusion</span>
                     </div>
                     <div
+=======
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
                         className={`nav-item ${view === "patients" ? "active" : ""}`}
                         onClick={() => setView("patients")}
                     >
                         <span>👤 Patients</span>
                     </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
                 </nav>
 
                 <div className="sidebar-footer">
@@ -1014,6 +1153,7 @@ function App() {
                         {renderResults(mrsiResults)}
                     </>
                 )}
+<<<<<<< HEAD
                 
                 {view === "fusion" && (
                      <FusionViewer 
@@ -1034,6 +1174,10 @@ function App() {
                         }} 
                     />
                 )}
+=======
+
+                {view === "patients" && <PatientsExplorer />}
+>>>>>>> 653ddbd (Frontend: fixes FFT  + fetch handling)
             </div>
         </div>
     );
