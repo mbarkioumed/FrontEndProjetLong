@@ -1,10 +1,10 @@
-# Getting Started with Create React App
+# Frontend for the N7 Projet Long. Cancer Research Platform. 
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
 ## Available Scripts
 
-In the project directory, you can run:
+to start up the application use
 
 ### `npm start`
 
