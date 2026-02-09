@@ -65,6 +65,7 @@ const Fusion3D = ({ irmData, cursor3D }) => {
             },
             name: "Brain Surface",
             hoverinfo: "none",
+            showscale: false,
         };
     };
 

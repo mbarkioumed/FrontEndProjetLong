@@ -151,6 +151,13 @@ function App() {
     const [theme, setTheme] = useState(
         () => localStorage.getItem("theme") || "light",
     );
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
+        () => localStorage.getItem("sidebarCollapsed") === "true",
+    );
+
+    useEffect(() => {
+        localStorage.setItem("sidebarCollapsed", isSidebarCollapsed);
+    }, [isSidebarCollapsed]);
 
     // Navigation 3D
     const [sliceIndices, setSliceIndices] = useState({
@@ -1029,52 +1036,66 @@ function App() {
 
     return (
         <div className="App">
-            <div className="sidebar">
+            <div className={`sidebar ${isSidebarCollapsed ? "collapsed" : ""}`}>
                 <div className="sidebar-header">
-                    <span style={{ fontSize: "1.5rem" }}>🏥</span>
+                    <span className="emoji">🏥</span>
                     <h1>Cancer Platform</h1>
                 </div>
+
+                <button 
+                    className="sidebar-toggle" 
+                    onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                    title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+                >
+                    {isSidebarCollapsed ? "→" : "←"}
+                </button>
+
                 <nav className="nav-links">
                     <div
                         className={`nav-item ${view === "home" ? "active" : ""}`}
                         onClick={() => setView("home")}
                     >
-                        <span>🏠 Accueil</span>
+                        <span className="icon">🏠</span>
+                        <span className="label">Accueil</span>
                     </div>
                     <div
                         className={`nav-item ${view === "irm" ? "active" : ""}`}
                         onClick={() => setView("irm")}
                     >
-                        <span>🧠 Upload IRM</span>
+                        <span className="icon">🧠</span>
+                        <span className="label">Upload IRM</span>
                     </div>
                     <div
                         className={`nav-item ${view === "mrsi" ? "active" : ""}`}
                         onClick={() => setView("mrsi")}
                     >
-                        <span>📊 Upload MRSI</span>
+                        <span className="icon">📊</span>
+                        <span className="label">Upload MRSI</span>
                     </div>
                     <div
                         className={`nav-item ${view === "fusion" ? "active" : ""}`}
                         onClick={() => setView("fusion")}
                     >
-                        <span>🔬 Test Fusion</span>
+                        <span className="icon">🔬</span>
+                        <span className="label">Test Fusion</span>
                     </div>
                     <div
                         className={`nav-item ${view === "patients" ? "active" : ""}`}
                         onClick={() => setView("patients")}
                     >
-                        <span>👤 Patients</span>
+                        <span className="icon">👤</span>
+                        <span className="label">Patients</span>
                     </div>
                 </nav>
 
                 <div className="sidebar-footer">
                     <button className="btn-logout" onClick={logout}>
-                        Déconnexion
+                        {isSidebarCollapsed ? "🚪" : "Déconnexion"}
                     </button>
                 </div>
             </div>
 
-            <div className="main-area">
+            <div className={`main-area ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
                 <div className="top-bar">
                     <div className="status-indicator">
                         <div
@@ -1143,7 +1164,7 @@ function App() {
                      />
                 )}
 
-                {view === "patients" && <PatientsExplorer onOpenExam={openExamFromPatients} />};
+                {view === "patients" && <PatientsExplorer onOpenExam={openExamFromPatients} />}
 
 
                 {currentSpectrum && (

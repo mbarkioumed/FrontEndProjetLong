@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { api } from "../api/client";
 import SliceCanvas from "./SliceCanvas";
+import Fusion3D from "./Fusion3D";
+
 
 
 export default function FusionViewer({ irmData, mrsiData, onVoxelClick }) {
@@ -204,8 +206,7 @@ export default function FusionViewer({ irmData, mrsiData, onVoxelClick }) {
             </div>
 
             <div className="mrsi-layout"> 
-                {/* Reusing mrsi-layout class for grid, or just default CSS grid */}
-                <div style={{display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px"}}>
+                <div className="viz-grid">
                      {irmData ? (
                          <>
                             <SliceCanvas 
@@ -232,6 +233,37 @@ export default function FusionViewer({ irmData, mrsiData, onVoxelClick }) {
                                 onClick={(x,y) => handleCanvasClick("axi", x, y)}
                                 crosshair={{x: crosshair.x, y: crosshair.y}}
                             />
+                            <div
+                                className="slice-control"
+                                style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    height: "100%",
+                                    minHeight: "350px",
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        flex: 1,
+                                        width: "100%",
+                                        minHeight: "300px",
+                                        background: "black",
+                                        borderRadius: "4px",
+                                        overflow: "hidden",
+                                    }}
+                                >
+                                    <Fusion3D
+                                        irmData={irmData}
+                                        cursor3D={crosshair}
+                                    />
+                                </div>
+                                <span
+                                    className="slice-label"
+                                    style={{ marginTop: "0.5rem", fontSize: "0.75rem", fontWeight: "bold", textTransform: "uppercase" }}
+                                >
+                                    3D Brain Preview
+                                </span>
+                            </div>
                          </>
                      ) : <p>Please load IRM data first.</p>}
                 </div>
