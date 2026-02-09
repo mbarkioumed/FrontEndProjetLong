@@ -140,11 +140,14 @@ function App() {
     } = useContext(AuthContext);
     const [view, setView] = useState("home");
     const [backendStatus, setBackendStatus] = useState(false);
+    const [selectedTraitement, setSelectedTraitement] = useState("fft_spatiale");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [irmResults, setIrmResults] = useState(null);
+    const canRunIrm = irmResults?.nom_fichier ? true : false;
     const [reference3DData, setReference3DData] = useState(null); // Stable data for 3D View
     const [mrsiResults, setMrsiResults] = useState(null);
+    const canRunMrsi = mrsiResults?.nom ? true : false;
     const [theme, setTheme] = useState(
         () => localStorage.getItem("theme") || "light",
     );
@@ -377,21 +380,25 @@ function App() {
         }
     };
 
-    const runFftTraitement = async () => {
-
-        if (!irmResults?.nom_fichier) return;
+    const runTraitement = async (dataInstance) => {
+        // dataInstance peut être irmResults ou mrsiResults
+        if (!dataInstance?.nom_fichier && !dataInstance?.nom) return;
         setLoading(true);
         setError("");
         try {
-            const response = await fetch(`${API_URL}/traitement/test_fft/`, {
+            // Déterminer le nom du fichier / instance
+            // C'est galère car pour IRM c'est nom_fichier et MRSI c'est nom
+            const key = dataInstance.nom_fichier || dataInstance.nom;
+            
+            const response = await fetch(`${API_URL}/traitements`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                     ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 },
                 body: JSON.stringify({
-                    [irmResults.nom_fichier]: {
-                        type_traitement: "fft",
+                    [key]: {
+                        type_traitement: selectedTraitement,
                     },
                 }),
             });
@@ -403,9 +410,9 @@ function App() {
 
             if (data?.error) throw new Error(data.error);
 
-            const next = data?.[irmResults.nom_fichier];
+            const next = data?.[key];
             if (next?.error) throw new Error(next.error);
-            if (!next) throw new Error("Réponse FFT inattendue.");
+            if (!next) throw new Error("Réponse traitement inattendue.");
 
             if (next.type === "IRM") {
                 setIrmResults(next);
@@ -421,7 +428,16 @@ function App() {
                     z: Math.floor(next.shape[2] / 2),
                 });
                 setView("irm");
-            } else {
+            } else if (next.type === "MRSI") {
+                setMrsiResults(next);
+                setSliceIndices((prev) => ({
+                    ...prev,
+                    mrsi: Math.floor(next.shape[2] / 2),
+                }));
+                setSelectedVoxel(null);
+                setCurrentSpectrum(null);
+                } 
+            else {
                 setIrmResults(next);
             }
         } catch (err) {
@@ -690,6 +706,7 @@ function App() {
             const axDispW = axOriented?.[0]?.length ?? 0;
 
             return (
+                
                 <div className="card">
                     <div
                         style={{
@@ -700,14 +717,37 @@ function App() {
                             flexWrap: "wrap",
                         }}
                     >
+                        
+                        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                            <select
+                                value={selectedTraitement}
+                                onChange={(e) => setSelectedTraitement(e.target.value)}
+                                disabled={loading}
+                            >
+                                <option value="fft_spatiale">FFT Spatiale</option>
+                                <option value="fft_spectrale">FFT Spectrale</option>
+                                <option value="metabolite_extractor">Extraction de Métabolites</option>
+                            </select>
+                            <button
+                                className="btn-secondary"
+                                
+                                disabled={loading}
+                            >
+                                ⚙️ Paramètres (A FAIRE)
+                            </button> 
+                            <button
+                                className="btn-primary"
+                                onClick={() =>runTraitement(irmResults)}
+                                disabled={loading || !canRunIrm}
+                            >
+                                {loading ? "Traitement..." : "Lancer Traitement IRM"}
+                            </button> 
+                        </div>
+
+
+
                         <h2>Résultats IRM : {results.nom_fichier}</h2>
-                        <button
-                            className="btn-primary"
-                            onClick={runFftTraitement}
-                            disabled={loading}
-                        >
-                            {loading ? "Traitement..." : "Traitement FFT"}
-                        </button>
+                        
                     </div>
 
                     {/* Panneau d’orientation pour trouver rapidement la bonne config */}
@@ -879,6 +919,33 @@ function App() {
             return (
                 <div className="card">
                     <h2>Résultats MRSI : {results.nom}</h2>
+                    
+                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                        <select
+                            value={selectedTraitement}
+                            onChange={(e) => setSelectedTraitement(e.target.value)}
+                            disabled={loading}
+                        >
+                            <option value="fft_spatiale">FFT Spatiale</option>
+                            <option value="fft_spectrale">FFT Spectrale</option>
+                            <option value="metabolite_extractor">Extraction de Métabolites</option>
+                        </select>
+                        <button
+                                className="btn-secondary"
+                                
+                                disabled={loading}
+                            >
+                                ⚙️ Paramètres (A FAIRE)
+                            </button> 
+                        <button
+                            className="btn-primary"
+                            onClick={() =>runTraitement(mrsiResults)}
+                            disabled={loading || !canRunMrsi}
+                        >
+                            {loading ? "Traitement..." : "Lancer Traitement MRSI"}
+                        </button>
+                    </div>
+                    
                     <p className="instruction">
                         Utilisez le slider pour changer de coupe, puis cliquez
                         sur un voxel pour voir son spectre.
