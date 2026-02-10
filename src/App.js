@@ -6,7 +6,6 @@ import Login from "./components/Login";
 import SliceCanvas from "./components/SliceCanvas";
 import Fusion3D from "./components/Fusion3D"; // New 3D View import
 import FusionViewer from "./components/FusionViewer";
-import SpectrumModal from "./components/SpectrumModal";
 import SpectrumChart from "./components/SpectrumChart";
 import PatientsExplorer from "./components/PatientsExplorer";
 
@@ -154,10 +153,17 @@ function App() {
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
         () => localStorage.getItem("sidebarCollapsed") === "true",
     );
+    const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(
+        () => localStorage.getItem("rightSidebarCollapsed") === "true",
+    );
 
     useEffect(() => {
         localStorage.setItem("sidebarCollapsed", isSidebarCollapsed);
     }, [isSidebarCollapsed]);
+
+    useEffect(() => {
+        localStorage.setItem("rightSidebarCollapsed", isRightSidebarCollapsed);
+    }, [isRightSidebarCollapsed]);
 
     // Navigation 3D
     const [sliceIndices, setSliceIndices] = useState({
@@ -1095,7 +1101,7 @@ function App() {
                 </div>
             </div>
 
-            <div className={`main-area ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+            <div className={`main-area ${isSidebarCollapsed ? "sidebar-collapsed" : ""} ${isRightSidebarCollapsed ? "right-sidebar-collapsed" : ""}`}>
                 <div className="top-bar">
                     <div className="status-indicator">
                         <div
@@ -1167,15 +1173,34 @@ function App() {
                 {view === "patients" && <PatientsExplorer onOpenExam={openExamFromPatients} />}
 
 
-                {currentSpectrum && (
-                    <SpectrumModal 
-                        data={currentSpectrum} 
-                        onClose={() => {
-                            setCurrentSpectrum(null);
-                            setSelectedVoxel(null);
-                        }} 
-                    />
-                )}
+
+            </div>
+
+            <div className={`sidebar right-sidebar ${isRightSidebarCollapsed ? "collapsed" : ""}`}>
+                <div className="sidebar-header">
+                    <span className="emoji">⚙️</span>
+                    <h1>Actions</h1>
+                </div>
+
+                <button 
+                    className="sidebar-toggle right" 
+                    onClick={() => setIsRightSidebarCollapsed(!isRightSidebarCollapsed)}
+                    title={isRightSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+                >
+                    {isRightSidebarCollapsed ? "←" : "→"}
+                </button>
+
+                <div className="nav-links">
+                    {/* RIGHT_SIDEBAR_CONTENT */}
+                    <div className="nav-item">
+                        <span className="icon">🚀</span>
+                        <span className="label">Button 1</span>
+                    </div>
+                    <div className="nav-item">
+                        <span className="icon">🛠️</span>
+                        <span className="label">Button 2</span>
+                    </div>
+                </div>
             </div>
         </div>
     );
