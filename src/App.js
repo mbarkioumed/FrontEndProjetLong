@@ -149,7 +149,6 @@ function App() {
     } = useContext(AuthContext);
     const [view, setView] = useState("home");
     const [backendStatus, setBackendStatus] = useState(false);
-    const [selectedTraitement, setSelectedTraitement] = useState("fft_spatiale");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [irmResults, setIrmResults] = useState(null);
@@ -157,6 +156,9 @@ function App() {
     const [reference3DData, setReference3DData] = useState(null); // Stable data for 3D View
     const [mrsiResults, setMrsiResults] = useState(null);
     const canRunMrsi = mrsiResults?.nom ? true : false;
+    const [isTraitementOpen, setIsTraitementOpen] = useState(false);
+    const [isParamOpen, setIsParamOpen] = useState(true);
+
     const [theme, setTheme] = useState(
         () => localStorage.getItem("theme") || "light",
     );
@@ -174,6 +176,48 @@ function App() {
     useEffect(() => {
         localStorage.setItem("rightSidebarCollapsed", isRightSidebarCollapsed);
     }, [isRightSidebarCollapsed]);
+
+    /* POST TRAITEMENT CHOIX */ 
+    const [catalog, setCatalog] = useState({});
+    const [selectedTraitement, setSelectedTraitement] = useState("");
+    const [traitementParams, setTraitementParams] = useState({}); // valeurs courantes pour le formulaire
+
+    useEffect(() => { /* chargement du catalogue */
+    const fetchCatalog = async () => {
+        try {
+            const response = await fetch(`${API_URL}/traitements/catalog`);
+            const data = await response.json();
+            setCatalog(data);
+
+            // Initialiser le premier traitement par défaut si besoin
+            const firstKey = Object.keys(data)[0];
+            setSelectedTraitement(firstKey);
+            setTraitementParams(data[firstKey].params || {});
+        } catch (err) {
+            console.error("Impossible de charger le catalogue :", err);
+        }
+    };
+
+    fetchCatalog();
+    }, []);
+
+    useEffect(() => { /* Type de traitement entre IRM et MRSI*/
+        if (!selectedTraitement) return;
+        const allowedTypes = catalog[selectedTraitement]?.type || [];
+        setTraitementParams((prev) => ({
+            ...prev,
+            dataType: allowedTypes[0] || null,
+            // réinitialiser les autres paramètres aux valeurs par défaut (utile si on change entre les traitements)
+            ...Object.fromEntries(
+            Object.entries(catalog[selectedTraitement]?.params || {}).map(
+                ([k, v]) => [k, v.default]
+            )
+            ),
+        }));
+    }, [selectedTraitement, catalog]);
+
+
+    /* FIN POST TRAITEMENT CHOIX */ 
 
     // Navigation 3D
     const [sliceIndices, setSliceIndices] = useState({
@@ -493,7 +537,7 @@ function App() {
         }
     };
 
-    const runTraitement = async (dataInstance) => {
+    const runTraitement = async (dataInstance, typeTraitement = selectedTraitement, params = {}) => {
         // dataInstance peut être irmResults ou mrsiResults
         if (!dataInstance?.nom_fichier && !dataInstance?.nom) return;
         setLoading(true);
@@ -502,18 +546,31 @@ function App() {
             // Déterminer le nom du fichier / instance
             // C'est galère car pour IRM c'est nom_fichier et MRSI c'est nom
             const key = dataInstance.nom_fichier || dataInstance.nom;
+
+            // Filtrer les seuls params valides pour ce traitement
+            // = on enlève datatype qu'on a mis précédemment avec les params
+            const paramDefs = catalog[typeTraitement]?.params || {};
+            const validParams = {};
+            Object.keys(paramDefs).forEach((k) => {
+                if (params[k] !== undefined) validParams[k] = params[k];
+            });
+
             
+            // Préparation de la payload
+            const bodyPayload = {
+                [key]: {
+                    type_traitement: typeTraitement,
+                    params: validParams,
+                },
+            };
+
             const response = await fetch(`${API_URL}/traitements`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                     ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 },
-                body: JSON.stringify({
-                    [key]: {
-                        type_traitement: selectedTraitement,
-                    },
-                }),
+                body: JSON.stringify(bodyPayload),
             });
 
             const data = await response.json().catch(() => ({}));
@@ -524,13 +581,14 @@ function App() {
             if (data?.error) throw new Error(data.error);
 
             const next = data?.[key];
-            if (next?.error) throw new Error(next.error);
             if (!next) throw new Error("Réponse traitement inattendue.");
+            if (next?.error) throw new Error(next.error);
+
+            if (next.data_b64) {
+                next.data_uint8 = base64ToUint8Array(next.data_b64);
+            }
 
             if (next.type === "IRM") {
-                if (next.data_b64) {
-                    next.data_uint8 = base64ToUint8Array(next.data_b64);
-                }
                 setIrmResults(next);
                 setSliceIndices((prev) => ({
                     ...prev,
@@ -545,9 +603,6 @@ function App() {
                 });
                 setView("irm");
             } else if (next.type === "MRSI") {
-                if (next.data_b64) {
-                    next.data_uint8 = base64ToUint8Array(next.data_b64);
-                }
                 setMrsiResults(next);
                 setSliceIndices((prev) => ({
                     ...prev,
@@ -809,34 +864,6 @@ function App() {
                             flexWrap: "wrap",
                         }}
                     >
-                        
-                        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                            <select
-                                value={selectedTraitement}
-                                onChange={(e) => setSelectedTraitement(e.target.value)}
-                                disabled={loading}
-                            >
-                                <option value="fft_spatiale">FFT Spatiale</option>
-                                <option value="fft_spectrale">FFT Spectrale</option>
-                                <option value="metabolite_extractor">Extraction de Métabolites</option>
-                            </select>
-                            <button
-                                className="btn-secondary"
-                                
-                                disabled={loading}
-                            >
-                                ⚙️ Paramètres (A FAIRE)
-                            </button> 
-                            <button
-                                className="btn-primary"
-                                onClick={() =>runTraitement(irmResults)}
-                                disabled={loading || !canRunIrm}
-                            >
-                                {loading ? "Traitement..." : "Lancer Traitement IRM"}
-                            </button> 
-                        </div>
-
-
 
                         <h2>Résultats IRM : {results.nom_fichier}</h2>
                         
@@ -1017,32 +1044,6 @@ function App() {
             return (
                 <div className="card">
                     <h2>Résultats MRSI : {results.nom}</h2>
-                    
-                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                        <select
-                            value={selectedTraitement}
-                            onChange={(e) => setSelectedTraitement(e.target.value)}
-                            disabled={loading}
-                        >
-                            <option value="fft_spatiale">FFT Spatiale</option>
-                            <option value="fft_spectrale">FFT Spectrale</option>
-                            <option value="metabolite_extractor">Extraction de Métabolites</option>
-                        </select>
-                        <button
-                                className="btn-secondary"
-                                
-                                disabled={loading}
-                            >
-                                ⚙️ Paramètres (A FAIRE)
-                            </button> 
-                        <button
-                            className="btn-primary"
-                            onClick={() =>runTraitement(mrsiResults)}
-                            disabled={loading || !canRunMrsi}
-                        >
-                            {loading ? "Traitement..." : "Lancer Traitement MRSI"}
-                        </button>
-                    </div>
                     
                     <p className="instruction">
                         Utilisez le slider pour changer de coupe, puis cliquez
@@ -1275,7 +1276,7 @@ function App() {
             <div className={`sidebar right-sidebar ${isRightSidebarCollapsed ? "collapsed" : ""}`}>
                 <div className="sidebar-header">
                     <span className="emoji">⚙️</span>
-                    <h1>Actions</h1>
+                    <h1>Post-Traitement</h1>
                 </div>
 
                 <button 
@@ -1288,14 +1289,175 @@ function App() {
 
                 <div className="nav-links">
                     {/* RIGHT_SIDEBAR_CONTENT */}
-                    <div className="nav-item">
-                        <span className="icon">🚀</span>
-                        <span className="label">Button 1</span>
+                    {/* Choix type traitement */}
+                    <div className="nav-dropdown">
+                        <div
+                            className="nav-item"
+                            onClick={() => setIsTraitementOpen(!isTraitementOpen)}
+                        >
+                            <span className={`arrow ${isTraitementOpen ? "" : "close"}`}>▼</span>
+                            <span className="label">{catalog[selectedTraitement]?.label || "Catalogue non trouvé"}</span>
+                            
+                        </div>
+
+                        {isTraitementOpen && (
+                            <div className="dropdown-menu">
+                                {Object.entries(catalog).map(([key, val]) => (
+                                    <div
+                                        key={key}
+                                        className="dropdown-option"
+                                        onClick={() => {
+                                            setSelectedTraitement(key);
+                                            const defaults = {};
+                                            Object.entries(val.params || {}).forEach(([k,v]) => defaults[k] = v.default);
+                                            setTraitementParams(defaults);
+                                            setIsTraitementOpen(false);
+                                        }}
+                                    >
+                                        {val.label}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
-                    <div className="nav-item">
-                        <span className="icon">🛠️</span>
-                        <span className="label">Button 2</span>
+
+                    {/* Bouton lancement traitement */}
+                    <button
+                        className="btn-primary"
+                        onClick={() => {
+                            // Déterminer l'instance selon le type choisi
+                            const instance =
+                                traitementParams.dataType === "IRM" ? irmResults :
+                                traitementParams.dataType === "MRSI" ? mrsiResults :
+                                null;
+
+                            if (!instance) return;
+
+                            runTraitement(instance, selectedTraitement, traitementParams);
+                        }}
+                        disabled={loading || !(
+                            (traitementParams.dataType === "IRM" && irmResults?.nom_fichier) ||
+                            (traitementParams.dataType === "MRSI" && mrsiResults?.nom)
+                        )}
+                    >
+                        {loading ? "Traitement..." : "Lancer Traitement"}
+                    </button>
+
+
+                    {/* Formulaire parametres */}
+                    <div
+                        className="nav-item"
+                        onClick={() => setIsParamOpen(!isParamOpen)}
+                    >
+                        <span className="icon">⚙️</span>
+                        <span className="label">Paramètres :</span>
                     </div>
+                    {isParamOpen && (
+                        <div className="traitement-form">
+                            {/* Bloc Type de données */}
+                            <div className="param-container">
+                                <label className="param-label">Type de données :</label>
+                                <div style={{ display: "flex", gap: "0.5rem" }}>
+                                {["IRM", "MRSI"].map((dt) => {
+                                    const isPossible = catalog[selectedTraitement]?.type.includes(dt);
+                                    const isSelected = traitementParams.dataType === dt;
+                                    return (
+                                    <div
+                                        key={dt}
+                                        className={`nav-item param-choice ${isSelected ? "selected" : ""} ${!isPossible ? "disabled" : ""}`}
+                                        onClick={() => {
+                                        if (!isPossible) return;
+                                        setTraitementParams({ ...traitementParams, dataType: dt });
+                                        }}
+                                    >
+                                        <span className="label">{dt}</span>
+                                    </div>
+                                    );
+                                })}
+                                </div>
+                            </div>
+                            {/* Bloc paramètres spécifiques traitement */}
+                            {Object.entries(catalog[selectedTraitement]?.params || {}).map(
+                                ([paramKey, paramDef]) => {
+                                return (
+                                    <div key={paramKey} className="param-container">
+                                    <label className="param-label">{paramDef.label} :</label>
+
+                                    {paramDef.type === "int" && (
+                                        <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
+                                            <input
+                                            className="param-input"
+                                            type="number"
+                                            min={paramDef.range[0]}
+                                            max={paramDef.range[1]}
+                                            value={paramDef.default}
+                                            onChange={(e) =>
+                                                setTraitementParams({
+                                                ...traitementParams,
+                                                [paramKey]: parseInt(e.target.value),
+                                                })
+                                            }
+                                            />
+                                            <small className="param-range">
+                                                Valeurs possibles : {paramDef.range[0]} – {paramDef.range[1]}
+                                            </small>
+                                        </div>
+                                    )}
+
+                                    {paramDef.type_param === "choix" && (
+                                        <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
+                                        <select
+                                        className="param-input"
+                                        value={traitementParams[paramKey] || paramDef.default}
+                                        onChange={(e) =>
+                                            setTraitementParams({
+                                            ...traitementParams,
+                                            [paramKey]: e.target.value,
+                                            })
+                                        }
+                                        >
+                                        {paramDef.select.map((opt) => (
+                                            <option key={opt} value={opt}>
+                                            {opt}
+                                            </option>
+                                        ))}
+                                        </select>
+                                        </div>
+                                    )}
+
+                                    {paramDef.type_param === "choix_multiple" && (
+                                        <div className="checkbox-group">
+                                        {paramDef.select.map((opt) => {
+                                            const current = traitementParams[paramKey] || [];
+                                            return (
+                                            <label key={opt} className="checkbox-label">
+                                                <input
+                                                type="checkbox"
+                                                checked={current.includes(opt)}
+                                                onChange={(e) => {
+                                                    let updated;
+                                                    if (e.target.checked) updated = [...current, opt];
+                                                    else updated = current.filter((x) => x !== opt);
+                                                    setTraitementParams({
+                                                    ...traitementParams,
+                                                    [paramKey]: updated,
+                                                    });
+                                                }}
+                                                />
+                                                {opt}
+                                            </label>
+                                            );
+                                        })}
+                                        </div>
+                                    )}
+
+                                    <hr className="param-divider" />
+                                    </div>
+                                );
+                                }
+                            )}
+                        </div>                    
+                    )}                    
                 </div>
             </div>
         </div>
