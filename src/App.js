@@ -543,8 +543,7 @@ function App() {
         setLoading(true);
         setError("");
         try {
-            // Déterminer le nom du fichier / instance
-            // C'est galère car pour IRM c'est nom_fichier et MRSI c'est nom
+            // Determine filename/instance key (IRM uses nom_fichier, MRSI uses nom)
             const key = dataInstance.nom_fichier || dataInstance.nom;
 
             // Filtrer les seuls params valides pour ce traitement
@@ -586,6 +585,12 @@ function App() {
 
             if (next.data_b64) {
                 next.data_uint8 = base64ToUint8Array(next.data_b64);
+            }
+
+            // Special handling for metabolite_extractor as requested: console log only
+            if (selectedTraitement === "metabolite_extractor") {
+                console.log("Résultat Extraction de Métabolites :", next);
+                return;
             }
 
             if (next.type === "IRM") {
@@ -1044,6 +1049,31 @@ function App() {
             return (
                 <div className="card">
                     <h2>Résultats MRSI : {results.nom}</h2>
+                    
+                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                        <select
+                            value={selectedTraitement}
+                            onChange={(e) => setSelectedTraitement(e.target.value)}
+                            disabled={loading}
+                        >
+                            <option value="fft_spectrale">FFT Spectrale</option>
+                            <option value="metabolite_extractor">Extraction de Métabolites</option>
+                        </select>
+                        <button
+                                className="btn-secondary"
+                                
+                                disabled={loading}
+                            >
+                                ⚙️ Paramètres (A FAIRE)
+                            </button> 
+                        <button
+                            className="btn-primary"
+                            onClick={() =>runTraitement(mrsiResults)}
+                            disabled={loading || !canRunMrsi}
+                        >
+                            {loading ? "Traitement..." : "Lancer Traitement MRSI"}
+                        </button>
+                    </div>
                     
                     <p className="instruction">
                         Utilisez le slider pour changer de coupe, puis cliquez
