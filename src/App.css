@@ -203,6 +203,8 @@ body {
     flex-direction: column;
     transition: margin 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     background-image: radial-gradient(circle at top right, rgba(37, 99, 235, 0.05), transparent);
+    min-width: 0;
+    /* Prevent overflow issues in flexbox */
 }
 
 .main-area.sidebar-collapsed {
@@ -405,7 +407,7 @@ button {
 canvas {
     max-width: 100%;
     height: auto;
-    min-height: 350px;
+    min-height: 250px;
     /* Force larger height for anisotropic images */
     background-color: black;
     border-radius: 4px;
@@ -440,19 +442,31 @@ canvas {
     margin-top: 1rem;
 }
 
-@media (max-width: 768px) {
-    .sidebar {
-        width: 80px;
+@media (max-width: 1200px) {
+    .main-area {
         padding: 1rem;
     }
 
+    .viz-grid {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .sidebar {
+        width: var(--sidebar-collapsed-width);
+        padding: 1.5rem 0.75rem;
+    }
+
     .sidebar-header h1,
-    .nav-item span {
+    .nav-item span.label,
+    .sidebar-toggle {
         display: none;
     }
 
     .main-area {
-        margin-left: 80px;
+        margin-left: var(--sidebar-collapsed-width);
+        margin-right: var(--sidebar-collapsed-width);
     }
 }
 
@@ -510,7 +524,7 @@ canvas {
 
 .viz-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
     gap: 1.5rem;
     margin-top: 1rem;
 }

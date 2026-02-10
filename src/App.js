@@ -508,8 +508,7 @@ function App() {
         setLoading(true);
         setError("");
         try {
-            // Déterminer le nom du fichier / instance
-            // C'est galère car pour IRM c'est nom_fichier et MRSI c'est nom
+            // Determine filename/instance key (IRM uses nom_fichier, MRSI uses nom)
             const key = dataInstance.nom_fichier || dataInstance.nom;
             
             const response = await fetch(`${API_URL}/traitements`, {
