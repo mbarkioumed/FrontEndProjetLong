@@ -24,8 +24,8 @@ const Fusion3D = ({ irmData, cursor3D }) => {
         const data = irmData.data_uint8;
         const [X, Y, Z] = irmData.shape;
 
-        // Target grid size for performance (e.g. max 64 points per axis)
-        const targetDim = 64; 
+        // Target grid size for performance (e.g. max 48 points per axis for smoother interaction)
+        const targetDim = 48; 
         const strideX = Math.ceil(X / targetDim);
         const strideY = Math.ceil(Y / targetDim);
         const strideZ = Math.ceil(Z / targetDim);

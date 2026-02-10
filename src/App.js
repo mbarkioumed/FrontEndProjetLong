@@ -175,6 +175,15 @@ function App() {
         localStorage.setItem("rightSidebarCollapsed", isRightSidebarCollapsed);
     }, [isRightSidebarCollapsed]);
 
+    // Sync treatment options with view
+    useEffect(() => {
+        if (view === "irm") {
+            setSelectedTraitement("fft_spatiale");
+        } else if (view === "mrsi") {
+            setSelectedTraitement("fft_spectrale");
+        }
+    }, [view]);
+
     // Navigation 3D
     const [sliceIndices, setSliceIndices] = useState({
         sagittal: 0,
@@ -527,6 +536,12 @@ function App() {
             if (next?.error) throw new Error(next.error);
             if (!next) throw new Error("Réponse traitement inattendue.");
 
+            // Special handling for metabolite_extractor as requested: console log only
+            if (selectedTraitement === "metabolite_extractor") {
+                console.log("Résultat Extraction de Métabolites :", next);
+                return;
+            }
+
             if (next.type === "IRM") {
                 if (next.data_b64) {
                     next.data_uint8 = base64ToUint8Array(next.data_b64);
@@ -811,15 +826,13 @@ function App() {
                     >
                         
                         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                            <select
-                                value={selectedTraitement}
-                                onChange={(e) => setSelectedTraitement(e.target.value)}
-                                disabled={loading}
-                            >
-                                <option value="fft_spatiale">FFT Spatiale</option>
-                                <option value="fft_spectrale">FFT Spectrale</option>
-                                <option value="metabolite_extractor">Extraction de Métabolites</option>
-                            </select>
+                                <select
+                                    value={selectedTraitement}
+                                    onChange={(e) => setSelectedTraitement(e.target.value)}
+                                    disabled={loading}
+                                >
+                                    <option value="fft_spatiale">FFT Spatiale</option>
+                                </select>
                             <button
                                 className="btn-secondary"
                                 
@@ -1024,7 +1037,6 @@ function App() {
                             onChange={(e) => setSelectedTraitement(e.target.value)}
                             disabled={loading}
                         >
-                            <option value="fft_spatiale">FFT Spatiale</option>
                             <option value="fft_spectrale">FFT Spectrale</option>
                             <option value="metabolite_extractor">Extraction de Métabolites</option>
                         </select>
