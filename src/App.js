@@ -152,10 +152,8 @@ function App() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [irmResults, setIrmResults] = useState(null);
-    const canRunIrm = irmResults?.nom_fichier ? true : false;
     const [reference3DData, setReference3DData] = useState(null); // Stable data for 3D View
     const [mrsiResults, setMrsiResults] = useState(null);
-    const canRunMrsi = mrsiResults?.nom ? true : false;
     const [isTraitementOpen, setIsTraitementOpen] = useState(false);
     const [isParamOpen, setIsParamOpen] = useState(true);
 
@@ -1049,31 +1047,6 @@ function App() {
             return (
                 <div className="card">
                     <h2>Résultats MRSI : {results.nom}</h2>
-                    
-                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                        <select
-                            value={selectedTraitement}
-                            onChange={(e) => setSelectedTraitement(e.target.value)}
-                            disabled={loading}
-                        >
-                            <option value="fft_spectrale">FFT Spectrale</option>
-                            <option value="metabolite_extractor">Extraction de Métabolites</option>
-                        </select>
-                        <button
-                                className="btn-secondary"
-                                
-                                disabled={loading}
-                            >
-                                ⚙️ Paramètres (A FAIRE)
-                            </button> 
-                        <button
-                            className="btn-primary"
-                            onClick={() =>runTraitement(mrsiResults)}
-                            disabled={loading || !canRunMrsi}
-                        >
-                            {loading ? "Traitement..." : "Lancer Traitement MRSI"}
-                        </button>
-                    </div>
                     
                     <p className="instruction">
                         Utilisez le slider pour changer de coupe, puis cliquez
