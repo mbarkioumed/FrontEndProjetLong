@@ -50,25 +50,35 @@ const SliceCanvas = ({
         if (!canvasRef.current || !data) return;
 
         const canvas = canvasRef.current;
-        const ctx = canvas.getContext("2d");
+        const ctx = canvas.getContext("2d", { alpha: false }); // Optimization: disable alpha if not needed
         const height = data.length;
         const width = data[0].length;
 
-        canvas.width = width;
-        canvas.height = height;
+        if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
+        }
 
-        // 1. Draw Base MRI
+        // 1. Draw Base MRI using Uint32Array for speed
         const imgData = ctx.createImageData(width, height);
+        const buf = new ArrayBuffer(imgData.data.length);
+        const buf8 = new Uint8ClampedArray(buf);
+        const data32 = new Uint32Array(buf);
+
         for (let y = 0; y < height; y++) {
+            const row = data[y];
+            const yOffset = y * width;
             for (let x = 0; x < width; x++) {
-                const val = data[y][x];
-                const idx = (y * width + x) * 4;
-                imgData.data[idx] = val;
-                imgData.data[idx + 1] = val;
-                imgData.data[idx + 2] = val;
-                imgData.data[idx + 3] = 255;
+                const val = row[x];
+                // ABGR format (little-endian: R G B A)
+                data32[yOffset + x] =
+                    (255 << 24) |    // Alpha
+                    (val << 16) |    // Blue
+                    (val << 8)  |    // Green
+                    val;             // Red
             }
         }
+        imgData.data.set(buf8);
         ctx.putImageData(imgData, 0, 0);
 
         // 2. Draw Overlay if present
@@ -81,43 +91,41 @@ const SliceCanvas = ({
             tempCanvas.height = oHeight;
             const tempCtx = tempCanvas.getContext("2d");
             const tempImgData = tempCtx.createImageData(oWidth, oHeight);
+            const oBuf = new ArrayBuffer(tempImgData.data.length);
+            const oBuf8 = new Uint8ClampedArray(oBuf);
+            const oData32 = new Uint32Array(oBuf);
 
             for (let y = 0; y < oHeight; y++) {
+                const oRow = overlay[y];
+                const yOffset = y * oWidth;
                 for (let x = 0; x < oWidth; x++) {
-                    const val = overlay[y][x];
-                    const idx = (y * oWidth + x) * 4;
-                    // Apply threshold for transparency (e.g. low values are transparent)
+                    const val = oRow[x];
                     if (val < 15) { 
-                        tempImgData.data[idx + 3] = 0; 
+                        oData32[yOffset + x] = 0; // Transparent
                     } else {
                         const [r, g, b] = getJetColor(val);
-                        tempImgData.data[idx] = r;
-                        tempImgData.data[idx + 1] = g;
-                        tempImgData.data[idx + 2] = b;
-                        tempImgData.data[idx + 3] = 255;
+                        oData32[yOffset + x] =
+                            (255 << 24) |
+                            (Math.floor(b) << 16) |
+                            (Math.floor(g) << 8) |
+                            Math.floor(r);
                     }
                 }
             }
+            tempImgData.data.set(oBuf8);
             tempCtx.putImageData(tempImgData, 0, 0);
 
             // Draw scaled
             ctx.globalAlpha = opacity;
             ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = "high";
             ctx.drawImage(tempCanvas, 0, 0, width, height);
             ctx.globalAlpha = 1.0;
         }
 
-        // MRSI marker (single voxel)
+        // MRSI marker
         if (isMRSI && selectedVoxel) {
             ctx.fillStyle = "#ff0000";
-            // Check if selectedVoxel matches THIS slice (handled by parent usually, but if standard 2D view)
-            // The markers logic in App.js usually relies on global coords. 
-            // Here, we just draw if generic coordinates match? 
-            // Actually, SliceCanvas is dumb. It draws where told.
-            // But if we want to support markers, we need logical coords. 
-            // For now, keep existing behavior:
-             ctx.fillRect(selectedVoxel.x, selectedVoxel.y, 1, 1);
+            ctx.fillRect(selectedVoxel.x, selectedVoxel.y, 1, 1);
         }
 
         // IRM crosshair

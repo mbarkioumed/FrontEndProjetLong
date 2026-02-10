@@ -63,76 +63,52 @@ export default function FusionViewer({ irmData, mrsiData, onVoxelClick }) {
 
     // Slicing Logic
     const slices = useMemo(() => {
-        if (!irmData || !irmData.data) return null;
+        if (!irmData || !irmData.data_uint8) return null;
         
-        const { data: vol, shape } = irmData;
+        const vol = irmData.data_uint8;
+        const shape = irmData.shape;
         const { x: cx, y: cy, z: cz } = crosshair;
         const [X, Y, Z] = shape;
 
-        // Pre-checking map availability
-        // Backend now returns map resampled to MRI grid but structured as slices along Z.
-        // mapVol is list[Z][X][Y].
-        // Access: mapVol[z][x][y].
-        let mapVol = null;
-        if (metaboliteMap && metaboliteMap.voxel_map_all) {
-             mapVol = metaboliteMap.voxel_map_all;
+        // Handle metabolite map (Base64)
+        let mapData = null;
+        if (metaboliteMap && metaboliteMap.data_b64) {
+             // We need to decode it once or keep it decoded
+             // For simplicity, decode here if not already (though would be better in useEffect)
+             if (!metaboliteMap.data_uint8) {
+                const bin = window.atob(metaboliteMap.data_b64);
+                metaboliteMap.data_uint8 = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) metaboliteMap.data_uint8[i] = bin.charCodeAt(i);
+             }
+             mapData = metaboliteMap.data_uint8;
         }
 
         // Extract MRI slices + Compute Overlay
         const extractSlice = (axis, index) => {
-            // axis: 0=Sag(x), 1=Cor(y), 2=Axi(z)
-            // Returns { mri: 2D, ov: 2D }
             const mriSlice = [];
             const ovSlice = [];
             
-            // Define dimensions for the slice
-            // Sag: (Y, Z)
-            // Cor: (X, Z)
-            // Axi: (X, Y)
-            
-            let D1, D2; // Width, Height of canvas
-            
-            if (axis === 0) { // Sagittal (Plane X = index) -> width=Y, height=Z
-                D1 = Y; D2 = Z;
-            } else if (axis === 1) { // Coronal (Plane Y = index) -> width=X, height=Z
-                D1 = X; D2 = Z;
-            } else { // Axial (Plane Z = index) -> width=X, height=Y
-                D1 = X; D2 = Y;
-            }
+            let D1, D2; 
+            if (axis === 0) { D1 = Y; D2 = Z; }
+            else if (axis === 1) { D1 = X; D2 = Z; }
+            else { D1 = X; D2 = Y; }
 
-            for (let r = 0; r < D2; r++) { // height (rows)
-                const mriRow = [];
-                const ovRow = [];
-                for (let c = 0; c < D1; c++) { // width (cols)
-                     let val = 0;
+            for (let r = 0; r < D2; r++) { 
+                const mriRow = new Uint8Array(D1);
+                const ovRow = new Uint8Array(D1);
+                for (let c = 0; c < D1; c++) { 
                      let i, j, k;
-                     
-                     // Map 2D (c, r) -> 3D (i, j, k)
-                     if (axis === 0) { // Sag: X fixed. c=Y, r=Z. 
-                         i = index; j = c; k = r;
-                     } else if (axis === 1) { // Cor: Y fixed. c=X, r=Z.
-                         i = c; j = index; k = r;
-                     } else { // Axi: Z fixed. c=X, r=Y.
-                         i = c; j = r; k = index;
-                     }
+                     if (axis === 0) { i = index; j = c; k = r; }
+                     else if (axis === 1) { i = c; j = index; k = r; }
+                     else { i = c; j = r; k = index; }
 
-                     // MRI Value (vol is [x][y][z])
-                     if (vol[i] && vol[i][j] !== undefined) {
-                         val = vol[i][j][k];
-                     }
-                     mriRow.push(val);
+                     const mriVal = vol[(i * Y * Z) + (j * Z) + k];
+                     mriRow[c] = mriVal;
                      
-                     // Overlay Value
-                     // Masking: if mri val is low (background), skip overlay
-                     if (val < 15) {
-                         ovRow.push(0);
+                     if (mriVal < 15 || !mapData) {
+                         ovRow[c] = 0;
                      } else {
-                         // Direct access: mapVol[k][i][j]
-                         let ovVal = 0;
-                         if (mapVol && mapVol[k] && mapVol[k][i] !== undefined) {
-                             ovVal = mapVol[k][i][j];
-                         }
-                         ovRow.push(ovVal);
+                         ovRow[c] = mapData[(i * Y * Z) + (j * Z) + k];
                      }
                 }
                 mriSlice.push(mriRow);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useContext } from "react";
 import "./App.css";
 import AuthContext from "./context/AuthContext";
@@ -10,6 +10,16 @@ import SpectrumChart from "./components/SpectrumChart";
 import PatientsExplorer from "./components/PatientsExplorer";
 
 import { api } from "./api/client";
+
+const base64ToUint8Array = (base64) => {
+    const binaryString = window.atob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+};
 
 
 const API_URL = "http://127.0.0.1:8000";
@@ -186,6 +196,84 @@ function App() {
         axial: { flipY: false, flipX: false, rotate: 90, transpose: false },
     });
 
+    // ===============================
+    // Optimization: Efficient Slicing from Flat Uint8Array
+    // ===============================
+    const sagOriented = useMemo(() => {
+        if (!irmResults?.data_uint8) return null;
+        const [X, Y, Z] = irmResults.shape;
+        const vol = irmResults.data_uint8;
+        const sx = sliceIndices.sagittal;
+        if (sx < 0 || sx >= X) return null;
+
+        // Extract slice [sx, :, :] -> original orientation [Y][Z] (row=Y, col=Z)
+        const slice = [];
+        for (let y = 0; y < Y; y++) {
+            const row = new Uint8Array(Z);
+            const offset = (sx * Y * Z) + (y * Z);
+            row.set(vol.subarray(offset, offset + Z));
+            slice.push(Array.from(row));
+        }
+        return orient2D(slice, orientIRM.sagittal);
+    }, [irmResults?.data_uint8, irmResults?.shape, sliceIndices.sagittal, orientIRM.sagittal]);
+
+    const corOriented = useMemo(() => {
+        if (!irmResults?.data_uint8) return null;
+        const [X, Y, Z] = irmResults.shape;
+        const vol = irmResults.data_uint8;
+        const sy = sliceIndices.coronal;
+        if (sy < 0 || sy >= Y) return null;
+
+        // Extract slice [:, sy, :] -> original orientation [X][Z] (row=X, col=Z)
+        const slice = [];
+        for (let x = 0; x < X; x++) {
+            const row = new Uint8Array(Z);
+            for (let z = 0; z < Z; z++) {
+                row[z] = vol[(x * Y * Z) + (sy * Z) + z];
+            }
+            slice.push(Array.from(row));
+        }
+        return orient2D(slice, orientIRM.coronal);
+    }, [irmResults?.data_uint8, irmResults?.shape, sliceIndices.coronal, orientIRM.coronal]);
+
+    const axOriented = useMemo(() => {
+        if (!irmResults?.data_uint8) return null;
+        const [X, Y, Z] = irmResults.shape;
+        const vol = irmResults.data_uint8;
+        const sz = sliceIndices.axial;
+        if (sz < 0 || sz >= Z) return null;
+
+        // Extract slice [:, :, sz] -> original orientation [X][Y] (row=X, col=Y)
+        const slice = [];
+        for (let x = 0; x < X; x++) {
+            const row = new Uint8Array(Y);
+            for (let y = 0; y < Y; y++) {
+                row[y] = vol[(x * Y * Z) + (y * Z) + sz];
+            }
+            slice.push(Array.from(row));
+        }
+        return orient2D(slice, orientIRM.axial);
+    }, [irmResults?.data_uint8, irmResults?.shape, sliceIndices.axial, orientIRM.axial]);
+
+    const sliceDims = useMemo(() => {
+        if (!irmResults?.shape) return null;
+        const [X, Y, Z] = irmResults.shape;
+
+        const sagDispW = sagOriented?.[0]?.length ?? 0;
+        const sagDispH = sagOriented?.length ?? 0;
+        const corDispW = corOriented?.[0]?.length ?? 0;
+        const corDispH = corOriented?.length ?? 0;
+        const axDispW = axOriented?.[0]?.length ?? 0;
+        const axDispH = axOriented?.length ?? 0;
+
+        return {
+            sagW: Z, sagH: Y, 
+            corW: Z, corH: X, 
+            axW: Y, axH: X,
+            sagDispW, sagDispH, corDispW, corDispH, axDispW, axDispH
+        };
+    }, [irmResults?.shape, sagOriented, corOriented, axOriented]);
+
     // Helpers
     const safeNum = (v) => (typeof v === "number" ? v : null);
 
@@ -284,6 +372,9 @@ function App() {
 
             // Initialisation des indices au centre pour l'IRM
             if (data.type === "IRM") {
+                if (data.data_b64) {
+                    data.data_uint8 = base64ToUint8Array(data.data_b64);
+                }
                 setIrmResults(data);
                 setReference3DData(data); // Initialize 3D view with original data
                 setSliceIndices((prev) => ({
@@ -300,6 +391,9 @@ function App() {
                 });
                 setView("irm");
             } else if (data.type === "MRSI") {
+                if (data.data_b64) {
+                    data.data_uint8 = base64ToUint8Array(data.data_b64);
+                }
                 setMrsiResults(data);
                 setSliceIndices((prev) => ({
                     ...prev,
@@ -325,6 +419,9 @@ function App() {
 
     if (irmFile) {
       const irmData = await api.uploadIRMFile(irmFile, token);
+      if (irmData.data_b64) {
+        irmData.data_uint8 = base64ToUint8Array(irmData.data_b64);
+      }
       setIrmResults(irmData);
       setReference3DData(irmData);
 
@@ -344,6 +441,9 @@ function App() {
 
     if (mrsiFile) {
       const mrsiData = await api.uploadMRSIFile(mrsiFile, token);
+      if (mrsiData.data_b64) {
+        mrsiData.data_uint8 = base64ToUint8Array(mrsiData.data_b64);
+      }
       setMrsiResults(mrsiData);
       setSliceIndices((prev) => ({
         ...prev,
@@ -428,6 +528,9 @@ function App() {
             if (!next) throw new Error("Réponse traitement inattendue.");
 
             if (next.type === "IRM") {
+                if (next.data_b64) {
+                    next.data_uint8 = base64ToUint8Array(next.data_b64);
+                }
                 setIrmResults(next);
                 setSliceIndices((prev) => ({
                     ...prev,
@@ -442,6 +545,9 @@ function App() {
                 });
                 setView("irm");
             } else if (next.type === "MRSI") {
+                if (next.data_b64) {
+                    next.data_uint8 = base64ToUint8Array(next.data_b64);
+                }
                 setMrsiResults(next);
                 setSliceIndices((prev) => ({
                     ...prev,
@@ -449,7 +555,8 @@ function App() {
                 }));
                 setSelectedVoxel(null);
                 setCurrentSpectrum(null);
-                } 
+                setView("mrsi");
+            }
             else {
                 setIrmResults(next);
             }
@@ -675,7 +782,7 @@ function App() {
         if (!results) return null;
 
         if (results.type === "IRM") {
-            const vol = results.data;
+            const vol = results.data_uint8;
             if (!vol) {
                 return (
                     <div className="error-message">
@@ -685,38 +792,10 @@ function App() {
                 );
             }
 
-            const sx = sliceIndices.sagittal;
-            const sy = sliceIndices.coronal;
-            const sz = sliceIndices.axial;
-
-            const sagSlice = sx < vol.length ? vol[sx] : [];
-
-            const corSlice = vol.map((row) => (sy < row.length ? row[sy] : []));
-
-            const axSlice = vol.map((row) =>
-                row.map((col) => (sz < col.length ? col[sz] : 0)),
-            );
-
-            const sagH = sagSlice?.length ?? 0;
-            const sagW = sagSlice?.[0]?.length ?? 0;
-
-            const corW = corSlice?.[0]?.length ?? 0;
-            const corH = corSlice?.length ?? 0;
-
-            const axH = axSlice?.length ?? 0;
-            const axW = axSlice?.[0]?.length ?? 0;
-
-            const sagOriented = orient2D(sagSlice, orientIRM.sagittal);
-            const sagDispH = sagOriented?.length ?? 0;
-            const sagDispW = sagOriented?.[0]?.length ?? 0;
-
-            const corOriented = orient2D(corSlice, orientIRM.coronal);
-            const corDispH = corOriented?.length ?? 0;
-            const corDispW = corOriented?.[0]?.length ?? 0;
-
-            const axOriented = orient2D(axSlice, orientIRM.axial);
-            const axDispH = axOriented?.length ?? 0;
-            const axDispW = axOriented?.[0]?.length ?? 0;
+            const {
+                sagW, sagH, corW, corH, axW, axH,
+                sagDispW, sagDispH, corDispW, corDispH, axDispW, axDispH
+            } = sliceDims || {};
 
             return (
                 
@@ -795,12 +874,14 @@ function App() {
                                 min="0"
                                 max={results.shape[0] - 1}
                                 value={sliceIndices.sagittal}
-                                onChange={(e) =>
+                                onChange={(e) => {
+                                    const val = parseInt(e.target.value, 10);
                                     setSliceIndices((prev) => ({
                                         ...prev,
-                                        sagittal: parseInt(e.target.value, 10),
-                                    }))
-                                }
+                                        sagittal: val,
+                                    }));
+                                    setCursor3D((prev) => ({ ...prev, x: val }));
+                                }}
                                 className="volume-slider"
                             />
                         </div>
@@ -833,12 +914,14 @@ function App() {
                                 min="0"
                                 max={results.shape[1] - 1}
                                 value={sliceIndices.coronal}
-                                onChange={(e) =>
+                                onChange={(e) => {
+                                    const val = parseInt(e.target.value, 10);
                                     setSliceIndices((prev) => ({
                                         ...prev,
-                                        coronal: parseInt(e.target.value, 10),
-                                    }))
-                                }
+                                        coronal: val,
+                                    }));
+                                    setCursor3D((prev) => ({ ...prev, y: val }));
+                                }}
                                 className="volume-slider"
                             />
                         </div>
@@ -871,12 +954,14 @@ function App() {
                                 min="0"
                                 max={results.shape[2] - 1}
                                 value={sliceIndices.axial}
-                                onChange={(e) =>
+                                onChange={(e) => {
+                                    const val = parseInt(e.target.value, 10);
                                     setSliceIndices((prev) => ({
                                         ...prev,
-                                        axial: parseInt(e.target.value, 10),
-                                    }))
-                                }
+                                        axial: val,
+                                    }));
+                                    setCursor3D((prev) => ({ ...prev, z: val }));
+                                }}
                                 className="volume-slider"
                             />
                         </div>
@@ -967,9 +1052,20 @@ function App() {
                         <div className="viz-grid single">
                             <div className="slice-control">
                                 <SliceCanvas
-                                    data={
-                                        results.voxel_map_all[sliceIndices.mrsi]
-                                    }
+                                    data={(() => {
+                                        if (!results.data_uint8) return null;
+                                        const [X, Y, Z] = results.shape;
+                                        const z = sliceIndices.mrsi;
+                                        const slice = [];
+                                        for (let x = 0; x < X; x++) {
+                                            // Manual extraction for non-contiguous axis (Z is deepest)
+                                            // Need manual extraction.
+                                            const manualRow = new Uint8Array(Y);
+                                            for(let y=0; y<Y; y++) manualRow[y] = results.data_uint8[(x * Y * Z) + (y * Z) + z];
+                                            slice.push(manualRow);
+                                        }
+                                        return slice;
+                                    })()}
                                     title={`Voxel Map (Z=${sliceIndices.mrsi})`}
                                     onClick={fetchSpectrum}
                                     selectedVoxel={selectedVoxel}
