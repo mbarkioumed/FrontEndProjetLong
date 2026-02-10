@@ -585,12 +585,6 @@ function App() {
                 next.data_uint8 = base64ToUint8Array(next.data_b64);
             }
 
-            // Special handling for metabolite_extractor as requested: console log only
-            if (selectedTraitement === "metabolite_extractor") {
-                console.log("Résultat Extraction de Métabolites :", next);
-                return;
-            }
-
             if (next.type === "IRM") {
                 setIrmResults(next);
                 setSliceIndices((prev) => ({
