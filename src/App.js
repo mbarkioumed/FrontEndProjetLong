@@ -271,13 +271,13 @@ function App() {
 
 
 
-    const fetchSpectrum = async (x, y, zVal = null) => {
+    const fetchSpectrum = async (name, x, y, zVal = null) => {
         const z = zVal !== null ? zVal : sliceIndices.mrsi;
         if (x == null || y == null) return;
-
         setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/spectrum/${x}/${y}/${z}`, {
+            
+            const res = await fetch(`${API_URL}/spectrum/${name}/${x}/${y}/${z}`, {
                 headers: {
                     Authorization: `Bearer ${token}`,
                 },
@@ -363,7 +363,7 @@ function App() {
                 setIrmResults(next);
             }
         } catch (err) {
-            setError(`Erreur FFT : ${err.message}`);
+            setError(`Erreur Post-Traitement : ${err.message}`);
         } finally {
             setLoading(false);
         }
@@ -461,7 +461,7 @@ function App() {
                                         return slice;
                                     })()}
                                     title={`Voxel Map (Z=${sliceIndices.mrsi})`}
-                                    onClick={fetchSpectrum}
+                                    onClick={(x, y) => fetchSpectrum(results.nom, x, y)}
                                     selectedVoxel={selectedVoxel}
                                     isMRSI={true}
                                 />
@@ -483,6 +483,7 @@ function App() {
                                             }));
                                             if (selectedVoxel)
                                                 fetchSpectrum(
+                                                    results.nom,
                                                     selectedVoxel.x,
                                                     selectedVoxel.y,
                                                     newZ,
@@ -684,7 +685,7 @@ function App() {
                      <FusionViewer 
                         irmData={irmResults} 
                         mrsiData={mrsiResults} 
-                        onVoxelClick={(x,y,z) => fetchSpectrum(x,y,z)} 
+                        onVoxelClick={(x,y,z) => fetchSpectrum(mrsiResults.nom,x,y,z)} 
                      />
                 )}
 
