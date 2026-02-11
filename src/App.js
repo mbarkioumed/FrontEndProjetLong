@@ -8,6 +8,7 @@ import Fusion3D from "./components/Fusion3D"; // New 3D View import
 import FusionViewer from "./components/FusionViewer";
 import SpectrumChart from "./components/SpectrumChart";
 import PatientsExplorer from "./components/PatientsExplorer";
+import IrmCard from "./components/IrmCard";
 
 import { api } from "./api/client";
 
@@ -24,112 +25,6 @@ const base64ToUint8Array = (base64) => {
 
 const API_URL = "http://127.0.0.1:8000";
 
-// ===============================
-// Helpers orientation 2D
-// ===============================
-const transpose2D = (m) => m[0].map((_, i) => m.map((row) => row[i]));
-const flipX2D = (m) => m.map((row) => [...row].reverse()); // miroir gauche/droite
-const flipY2D = (m) => [...m].reverse(); // miroir haut/bas
-
-const rot90CW2D = (m) => flipX2D(transpose2D(m)); // 90° horaire
-const rot90CCW2D = (m) => flipY2D(transpose2D(m)); // 90° anti-horaire
-const rot1802D = (m) => flipY2D(flipX2D(m));
-
-/**
- * o = { transpose?:boolean, rotate?:0|90|-90|180, flipX?:boolean, flipY?:boolean }
- */
-const orient2D = (m, o = {}) => {
-    if (!m) return m;
-    let out = m;
-
-    if (o.transpose) out = transpose2D(out);
-    if (o.rotate === 90) out = rot90CW2D(out);
-    if (o.rotate === -90) out = rot90CCW2D(out);
-    if (o.rotate === 180) out = rot1802D(out);
-    if (o.flipX) out = flipX2D(out);
-    if (o.flipY) out = flipY2D(out);
-
-    return out;
-};
-
-const inversePoint = (x, y, width, height, o = {}) => {
-    let px = x,
-        py = y;
-    let w = width,
-        h = height;
-
-    // Inverse flips (appliqués en dernier)
-    if (o.flipY) py = h - 1 - py;
-    if (o.flipX) px = w - 1 - px;
-
-    // Inverse rotation
-    if (o.rotate === 180) {
-        px = w - 1 - px;
-        py = h- 1 - py;
-    } else if (o.rotate === 90) {
-        // inverse d'un 90° CW = 90° CCW
-        const nx = py;
-        const ny = w - 1 - px;
-        px = nx;
-        py = ny;
-        [w, h] = [h, w];
-    } else if (o.rotate === -90) {
-        // inverse d'un 90° CCW = 90° CW
-        const nx = h - 1 - py;
-        const ny = px;
-        px = nx;
-        py = ny;
-        [w, h] = [h, w];
-    }
-
-    // Inverse transpose
-    if (o.transpose) {
-        const nx = py;
-        const ny = px;
-        px = nx;
-        py = ny;
-        [w, h] = [h, w];
-    }
-
-    return { x: px, y: py };
-};
-
-const forwardPoint = (x, y, width, height, o = {}) => {
-    let px = x,
-        py = y;
-    let w = width,
-        h = height;
-
-    if (o.transpose) {
-        const nx = py;
-        const ny = px;
-        px = nx;
-        py = ny;
-        [w, h] = [h, w];
-    }
-
-    if (o.rotate === 90) {
-        const nx = h - 1 - py;
-        const ny = px;
-        px = nx;
-        py = ny;
-        [w, h] = [h, w];
-    } else if (o.rotate === -90) {
-        const nx = py;
-        const ny = w - 1 - px;
-        px = nx;
-        py = ny;
-        [w, h] = [h, w];
-    } else if (o.rotate === 180) {
-        px = w - 1 - px;
-        py = h - 1 - py;
-    }
-
-    if (o.flipX) px = w - 1 - px;
-    if (o.flipY) py = h - 1 - py;
-
-    return { x: px, y: py };
-};
 
 // ===============================
 // UI Debug orientation (facultatif mais pratique)
@@ -156,6 +51,10 @@ function App() {
     const [mrsiResults, setMrsiResults] = useState(null);
     const [isTraitementOpen, setIsTraitementOpen] = useState(false);
     const [isParamOpen, setIsParamOpen] = useState(true);
+
+    const [irmCards, setIrmCards] = useState([
+        { id: Date.now(), results: null }
+    ]);
 
     const [theme, setTheme] = useState(
         () => localStorage.getItem("theme") || "light",
@@ -219,147 +118,18 @@ function App() {
 
     // Navigation 3D
     const [sliceIndices, setSliceIndices] = useState({
-        sagittal: 0,
-        coronal: 0,
-        axial: 0,
         mrsi: 0,
     });
-
-    // Cursor 3D pour synchro crosshair IRM
-    const [cursor3D, setCursor3D] = useState({ x: null, y: null, z: null });
 
     // MRSI Interaction
     const [selectedVoxel, setSelectedVoxel] = useState(null);
     const [currentSpectrum, setCurrentSpectrum] = useState(null);
 
-    const [orientIRM, setOrientIRM] = useState({
-        sagittal: { flipY: false, flipX: false, rotate: -90, transpose: false },
-        coronal: { flipY: false, flipX: true, rotate: -90, transpose: false },
-        axial: { flipY: false, flipX: false, rotate: 90, transpose: false },
-    });
-
     // ===============================
     // Optimization: Efficient Slicing from Flat Uint8Array
     // ===============================
-    const sagOriented = useMemo(() => {
-        if (!irmResults?.data_uint8) return null;
-        const [X, Y, Z] = irmResults.shape;
-        const vol = irmResults.data_uint8;
-        const sx = sliceIndices.sagittal;
-        if (sx < 0 || sx >= X) return null;
-
-        // Extract slice [sx, :, :] -> original orientation [Y][Z] (row=Y, col=Z)
-        const slice = [];
-        for (let y = 0; y < Y; y++) {
-            const row = new Uint8Array(Z);
-            const offset = (sx * Y * Z) + (y * Z);
-            row.set(vol.subarray(offset, offset + Z));
-            slice.push(Array.from(row));
-        }
-        return orient2D(slice, orientIRM.sagittal);
-    }, [irmResults?.data_uint8, irmResults?.shape, sliceIndices.sagittal, orientIRM.sagittal]);
-
-    const corOriented = useMemo(() => {
-        if (!irmResults?.data_uint8) return null;
-        const [X, Y, Z] = irmResults.shape;
-        const vol = irmResults.data_uint8;
-        const sy = sliceIndices.coronal;
-        if (sy < 0 || sy >= Y) return null;
-
-        // Extract slice [:, sy, :] -> original orientation [X][Z] (row=X, col=Z)
-        const slice = [];
-        for (let x = 0; x < X; x++) {
-            const row = new Uint8Array(Z);
-            for (let z = 0; z < Z; z++) {
-                row[z] = vol[(x * Y * Z) + (sy * Z) + z];
-            }
-            slice.push(Array.from(row));
-        }
-        return orient2D(slice, orientIRM.coronal);
-    }, [irmResults?.data_uint8, irmResults?.shape, sliceIndices.coronal, orientIRM.coronal]);
-
-    const axOriented = useMemo(() => {
-        if (!irmResults?.data_uint8) return null;
-        const [X, Y, Z] = irmResults.shape;
-        const vol = irmResults.data_uint8;
-        const sz = sliceIndices.axial;
-        if (sz < 0 || sz >= Z) return null;
-
-        // Extract slice [:, :, sz] -> original orientation [X][Y] (row=X, col=Y)
-        const slice = [];
-        for (let x = 0; x < X; x++) {
-            const row = new Uint8Array(Y);
-            for (let y = 0; y < Y; y++) {
-                row[y] = vol[(x * Y * Z) + (y * Z) + sz];
-            }
-            slice.push(Array.from(row));
-        }
-        return orient2D(slice, orientIRM.axial);
-    }, [irmResults?.data_uint8, irmResults?.shape, sliceIndices.axial, orientIRM.axial]);
-
-    const sliceDims = useMemo(() => {
-        if (!irmResults?.shape) return null;
-        const [X, Y, Z] = irmResults.shape;
-
-        const sagDispW = sagOriented?.[0]?.length ?? 0;
-        const sagDispH = sagOriented?.length ?? 0;
-        const corDispW = corOriented?.[0]?.length ?? 0;
-        const corDispH = corOriented?.length ?? 0;
-        const axDispW = axOriented?.[0]?.length ?? 0;
-        const axDispH = axOriented?.length ?? 0;
-
-        return {
-            sagW: Z, sagH: Y, 
-            corW: Z, corH: X, 
-            axW: Y, axH: X,
-            sagDispW, sagDispH, corDispW, corDispH, axDispW, axDispH
-        };
-    }, [irmResults?.shape, sagOriented, corOriented, axOriented]);
 
     // Helpers
-    const safeNum = (v) => (typeof v === "number" ? v : null);
-
-    const crosshairXY = (plane, sliceW, sliceH, xOrig, yOrig) => {
-        let x = safeNum(xOrig);
-        let y = safeNum(yOrig);
-        if (x == null || y == null) return { x: null, y: null };
-
-        const o = orientIRM[plane] || {};
-        return forwardPoint(x, y, sliceW, sliceH, o);
-    };
-
-    const handleAxialClick = (x, y) => {
-        const z = sliceIndices.axial;
-        setCursor3D({ x, y, z });
-        setSliceIndices((prev) => ({
-            ...prev,
-            sagittal: x,
-            coronal: y,
-            axial: z,
-        }));
-    };
-
-    const handleCoronalClick = (x, z) => {
-        const y = sliceIndices.coronal;
-        setCursor3D({ x, y, z });
-        setSliceIndices((prev) => ({
-            ...prev,
-            sagittal: x,
-            coronal: y,
-            axial: z,
-        }));
-    };
-
-    const handleSagittalClick = (y, z) => {
-        const x = sliceIndices.sagittal;
-        setCursor3D({ x, y, z });
-        setSliceIndices((prev) => ({
-            ...prev,
-            sagittal: x,
-            coronal: y,
-            axial: z,
-        }));
-    };
 
     useEffect(() => {
         if (user) {
@@ -384,7 +154,7 @@ function App() {
         }
     };
 
-    const handleUpload = async (e, type) => {
+    const handleUpload = async (e, type, cardId = null) => {
         e.preventDefault();
         const formData = new FormData(e.target);
         const file = formData.get("fichier");
@@ -419,18 +189,20 @@ function App() {
                 }
                 setIrmResults(data);
                 setReference3DData(data); // Initialize 3D view with original data
-                setSliceIndices((prev) => ({
-                    ...prev,
-                    sagittal: Math.floor(data.shape[0] / 2),
-                    coronal: Math.floor(data.shape[1] / 2),
-                    axial: Math.floor(data.shape[2] / 2),
-                }));
-                // Reset cursor
-                setCursor3D({
-                    x: Math.floor(data.shape[0] / 2),
-                    y: Math.floor(data.shape[1] / 2),
-                    z: Math.floor(data.shape[2] / 2),
-                });
+                
+                if (cardId) {
+                    setIrmCards(prev => prev.map(c => c.id === cardId ? { ...c, results: data } : c));
+                } else {
+                    // Update the first empty card or add new one
+                    setIrmCards(prev => {
+                        const firstEmpty = prev.find(c => !c.results);
+                        if (firstEmpty) {
+                            return prev.map(c => c.id === firstEmpty.id ? { ...c, results: data } : c);
+                        } else {
+                            return [...prev, { id: Date.now(), results: data }];
+                        }
+                    });
+                }
                 setView("irm");
             } else if (data.type === "MRSI") {
                 if (data.data_b64) {
@@ -466,19 +238,7 @@ function App() {
       }
       setIrmResults(irmData);
       setReference3DData(irmData);
-
-      // init slices center
-      setSliceIndices((prev) => ({
-        ...prev,
-        sagittal: Math.floor(irmData.shape[0] / 2),
-        coronal: Math.floor(irmData.shape[1] / 2),
-        axial: Math.floor(irmData.shape[2] / 2),
-      }));
-      setCursor3D({
-        x: Math.floor(irmData.shape[0] / 2),
-        y: Math.floor(irmData.shape[1] / 2),
-        z: Math.floor(irmData.shape[2] / 2),
-      });
+      setIrmCards([{ id: Date.now(), results: irmData }]);
     }
 
     if (mrsiFile) {
@@ -587,17 +347,7 @@ function App() {
 
             if (next.type === "IRM") {
                 setIrmResults(next);
-                setSliceIndices((prev) => ({
-                    ...prev,
-                    sagittal: Math.floor(next.shape[0] / 2),
-                    coronal: Math.floor(next.shape[1] / 2),
-                    axial: Math.floor(next.shape[2] / 2),
-                }));
-                setCursor3D({
-                    x: Math.floor(next.shape[0] / 2),
-                    y: Math.floor(next.shape[1] / 2),
-                    z: Math.floor(next.shape[2] / 2),
-                });
+                setIrmCards(prev => prev.map((c, i) => i === 0 ? { ...c, results: next } : c));
                 setView("irm");
             } else if (next.type === "MRSI") {
                 setMrsiResults(next);
@@ -642,10 +392,10 @@ function App() {
         </div>
     );
 
-    const renderUploadForm = (type) => (
+    const renderUploadForm = (type, cardId = null) => (
         <div className="card">
             <h2>Upload {type}</h2>
-            <form onSubmit={(e) => handleUpload(e, type)}>
+            <form onSubmit={(e) => handleUpload(e, type, cardId)}>
                 <div className="form-group">
                     <label>Fichier NIfTI (.nii, .nii.gz)</label>
                     <input
@@ -674,367 +424,13 @@ function App() {
         </div>
     );
 
-    const renderOrientationControls = () => (
-        <div
-            className="card"
-            style={{
-                padding: "0.75rem 1rem",
-                marginBottom: "1rem",
-                borderLeft: "4px solid var(--text-muted)",
-            }}
-        >
-            <div
-                style={{
-                    display: "flex",
-                    gap: "1rem",
-                    flexWrap: "wrap",
-                    alignItems: "center",
-                }}
-            >
-                <strong>Orientation IRM (debug)</strong>
-                <span
-                    style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}
-                >
-                    Ajuste ici jusqu’à obtenir la bonne vue, puis fige les
-                    valeurs.
-                </span>
-            </div>
-
-            <div
-                style={{
-                    display: "flex",
-                    gap: "0.5rem",
-                    flexWrap: "wrap",
-                    marginTop: "0.5rem",
-                    justifyContent: "center",
-                }}
-            >
-                {["sagittal", "coronal", "axial"].map((plane) => (
-                    <div
-                        key={plane}
-                        style={{
-                            display: "flex",
-                            gap: "0.75rem",
-                            alignItems: "center",
-                            padding: "0.5rem 0.75rem",
-                            border: "1px solid var(--border-color)",
-                            borderRadius: "10px",
-                            background: "var(--card-bg)",
-                        }}
-                    >
-                        <strong style={{ minWidth: 70 }}>
-                            {PLANE_LABEL[plane]}
-                        </strong>
-
-                        <label
-                            style={{
-                                display: "flex",
-                                gap: 6,
-                                alignItems: "center",
-                            }}
-                        >
-                            <input
-                                type="checkbox"
-                                checked={orientIRM[plane].flipX}
-                                onChange={(e) =>
-                                    setOrientIRM((p) => ({
-                                        ...p,
-                                        [plane]: {
-                                            ...p[plane],
-                                            flipX: e.target.checked,
-                                        },
-                                    }))
-                                }
-                            />
-                            flipX
-                        </label>
-
-                        <label
-                            style={{
-                                display: "flex",
-                                gap: 6,
-                                alignItems: "center",
-                            }}
-                        >
-                            <input
-                                type="checkbox"
-                                checked={orientIRM[plane].flipY}
-                                onChange={(e) =>
-                                    setOrientIRM((p) => ({
-                                        ...p,
-                                        [plane]: {
-                                            ...p[plane],
-                                            flipY: e.target.checked,
-                                        },
-                                    }))
-                                }
-                            />
-                            flipY
-                        </label>
-
-                        <label
-                            style={{
-                                display: "flex",
-                                gap: 6,
-                                alignItems: "center",
-                            }}
-                        >
-                            rotate
-                            <select
-                                value={orientIRM[plane].rotate}
-                                onChange={(e) =>
-                                    setOrientIRM((p) => ({
-                                        ...p,
-                                        [plane]: {
-                                            ...p[plane],
-                                            rotate: parseInt(
-                                                e.target.value,
-                                                10,
-                                            ),
-                                        },
-                                    }))
-                                }
-                            >
-                                <option value={0}>0</option>
-                                <option value={90}>90</option>
-                                <option value={-90}>-90</option>
-                                <option value={180}>180</option>
-                            </select>
-                        </label>
-
-                        <label
-                            style={{
-                                display: "flex",
-                                gap: 6,
-                                alignItems: "center",
-                            }}
-                        >
-                            <input
-                                type="checkbox"
-                                checked={orientIRM[plane].transpose}
-                                onChange={(e) =>
-                                    setOrientIRM((p) => ({
-                                        ...p,
-                                        [plane]: {
-                                            ...p[plane],
-                                            transpose: e.target.checked,
-                                        },
-                                    }))
-                                }
-                            />
-                            transpose
-                        </label>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
 
     const renderResults = (results) => {
         if (!results) return null;
 
         if (results.type === "IRM") {
-            const vol = results.data_uint8;
-            if (!vol) {
-                return (
-                    <div className="error-message">
-                        Données invalides ou obsolètes. Veuillez re-uploader le
-                        fichier.
-                    </div>
-                );
-            }
-
-            const {
-                sagW, sagH, corW, corH, axW, axH,
-                sagDispW, sagDispH, corDispW, corDispH, axDispW, axDispH
-            } = sliceDims || {};
-
-            return (
-                
-                <div className="card">
-                    <div
-                        style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: "1rem",
-                            flexWrap: "wrap",
-                        }}
-                    >
-
-                        <h2>Résultats IRM : {results.nom_fichier}</h2>
-                        
-                    </div>
-
-                    {/* Panneau d’orientation pour trouver rapidement la bonne config */}
-                    {renderOrientationControls()}
-
-                    <div className="viz-grid">
-                        {/* Sagittal */}
-                        <div className="slice-control">
-                            <SliceCanvas
-                                data={sagOriented}
-                                title={`Sagittal (X=${sliceIndices.sagittal})`}
-                                onClick={(xDisp, yDisp) => {
-                                    const p = inversePoint(
-                                        xDisp,
-                                        yDisp,
-                                        sagDispW,
-                                        sagDispH,
-                                        orientIRM.sagittal,
-                                    );
-                                    handleSagittalClick(p.y, p.x);
-                                }}
-                                crosshair={crosshairXY(
-                                    "sagittal",
-                                    sagW,
-                                    sagH,
-                                    cursor3D?.z,
-                                    cursor3D?.y,
-                                )}
-                            />
-                            <input
-                                type="range"
-                                min="0"
-                                max={results.shape[0] - 1}
-                                value={sliceIndices.sagittal}
-                                onChange={(e) => {
-                                    const val = parseInt(e.target.value, 10);
-                                    setSliceIndices((prev) => ({
-                                        ...prev,
-                                        sagittal: val,
-                                    }));
-                                    setCursor3D((prev) => ({ ...prev, x: val }));
-                                }}
-                                className="volume-slider"
-                            />
-                        </div>
-
-                        {/* Coronal */}
-                        <div className="slice-control">
-                            <SliceCanvas
-                                data={corOriented}
-                                title={`Coronal (Y=${sliceIndices.coronal})`}
-                                onClick={(xDisp, yDisp) => {
-                                    const p = inversePoint(
-                                        xDisp,
-                                        yDisp,
-                                        corDispW,
-                                        corDispH,
-                                        orientIRM.coronal,
-                                    );
-                                    handleCoronalClick(p.y, p.x);
-                                }}
-                                crosshair={crosshairXY(
-                                    "coronal",
-                                    corW,
-                                    corH,
-                                    cursor3D?.z,
-                                    cursor3D?.x,
-                                )}
-                            />
-                            <input
-                                type="range"
-                                min="0"
-                                max={results.shape[1] - 1}
-                                value={sliceIndices.coronal}
-                                onChange={(e) => {
-                                    const val = parseInt(e.target.value, 10);
-                                    setSliceIndices((prev) => ({
-                                        ...prev,
-                                        coronal: val,
-                                    }));
-                                    setCursor3D((prev) => ({ ...prev, y: val }));
-                                }}
-                                className="volume-slider"
-                            />
-                        </div>
-
-                        {/* Axial */}
-                        <div className="slice-control">
-                            <SliceCanvas
-                                data={axOriented}
-                                title={`Axial (Z=${sliceIndices.axial})`}
-                                onClick={(xDisp, yDisp) => {
-                                    const p = inversePoint(
-                                        xDisp,
-                                        yDisp,
-                                        axDispW,
-                                        axDispH,
-                                        orientIRM.axial,
-                                    );
-                                    handleAxialClick(p.y, p.x);
-                                }}
-                                crosshair={crosshairXY(
-                                    "axial",
-                                    axW,
-                                    axH,
-                                    cursor3D?.y,
-                                    cursor3D?.x,
-                                )}
-                            />
-                            <input
-                                type="range"
-                                min="0"
-                                max={results.shape[2] - 1}
-                                value={sliceIndices.axial}
-                                onChange={(e) => {
-                                    const val = parseInt(e.target.value, 10);
-                                    setSliceIndices((prev) => ({
-                                        ...prev,
-                                        axial: val,
-                                    }));
-                                    setCursor3D((prev) => ({ ...prev, z: val }));
-                                }}
-                                className="volume-slider"
-                            />
-                        </div>
-
-                        <div
-                            className="slice-control"
-                            style={{
-                                display: "flex",
-                                flexDirection: "column",
-                                height: "100%",
-                                minHeight: "350px",
-                            }}
-                        >
-                            <div
-                                style={{
-                                    flex: 1,
-                                    width: "100%",
-                                    minHeight: "300px",
-                                    background: "black",
-                                    borderRadius: "4px",
-                                    overflow: "hidden",
-                                }}
-                            >
-                                <Fusion3D
-                                    irmData={reference3DData || results}
-                                    cursor3D={cursor3D}
-                                />
-                            </div>
-                            <span
-                                className="slice-label"
-                                style={{ marginTop: "0.5rem" }}
-                            >
-                                3D Brain Preview
-                            </span>
-                        </div>
-                    </div>
-
-                    <div
-                        style={{
-                            marginTop: "1rem",
-                            color: "var(--text-muted)",
-                            fontSize: "0.85rem",
-                        }}
-                    >
-                        Astuce: commence par flipY, puis teste rotate 90 / -90
-                        sur la vue qui reste “bizarre”.
-                    </div>
-                </div>
-            );
+            // IRM results are now handled by IrmCard component in the main render loop
+            return null;
         }
 
         if (results.type === "MRSI") {
@@ -1244,10 +640,38 @@ function App() {
 
                 {view === "home" && renderHome()}
                 {view === "irm" && (
-                    <>
-                        {renderUploadForm("IRM")}
-                        {renderResults(irmResults)}
-                    </>
+                    <div className="irm-comparison-container" style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
+                        {irmCards.map((card) => (
+                            <IrmCard 
+                                key={card.id}
+                                cardId={card.id}
+                                results={card.results}
+                                onDuplicate={(results) => {
+                                    setIrmCards(prev => {
+                                        const index = prev.findIndex(c => c.id === card.id);
+                                        const newCard = { id: Date.now(), results: { ...results } };
+                                        const newCards = [...prev];
+                                        newCards.splice(index + 1, 0, newCard);
+                                        return newCards;
+                                    });
+                                }}
+                                onDelete={(id) => {
+                                    setIrmCards(prev => {
+                                        if (prev.length === 1) return [{ id: Date.now(), results: null }];
+                                        return prev.filter(c => c.id !== id);
+                                    });
+                                }}
+                                renderUploadForm={renderUploadForm}
+                            />
+                        ))}
+                        <button 
+                            className="btn-primary" 
+                            style={{ alignSelf: "center", padding: "1rem 2rem", fontSize: "1.1rem" }}
+                            onClick={() => setIrmCards(prev => [...prev, { id: Date.now(), results: null }])}
+                        >
+                            + Ajouter une nouvelle carte de comparaison
+                        </button>
+                    </div>
                 )}
                 {view === "mrsi" && (
                     <>

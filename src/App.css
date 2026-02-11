@@ -199,25 +199,31 @@ body {
 
 /* Main Content Area */
 .main-area {
-    margin-left: var(--sidebar-width);
-    margin-right: var(--sidebar-width);
+    margin-left: 260px;
+    margin-right: 0;
     flex: 1;
-    padding: 2rem;
+    padding: 1.5rem 2rem;
     display: flex;
     flex-direction: column;
-    transition: margin 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.3s ease, margin 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    min-height: 100vh;
     background-image: radial-gradient(circle at top right, rgba(37, 99, 235, 0.05), transparent);
     min-width: 0;
-    /* Prevent overflow issues in flexbox */
 }
 
 .main-area.sidebar-collapsed {
-    margin-left: var(--sidebar-collapsed-width);
+    margin-left: 80px;
 }
 
 .main-area.right-sidebar-collapsed {
-    margin-right: var(--sidebar-collapsed-width);
+    margin-right: 0;
 }
+
+/* If not collapsed, add margin for right sidebar */
+.main-area:not(.right-sidebar-collapsed) {
+    margin-right: 260px;
+}
+
 
 .top-bar {
     display: flex;
@@ -775,104 +781,112 @@ canvas {
 }
 
 .dropdown-option:hover {
-    background: rgba(255,255,255,0.08);
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .arrow {
     display: inline-block;
     transition: transform 0.2s ease;
-    margin-right: 0.5rem; /* espace entre flèche et label */
+    margin-right: 0.5rem;
+    /* espace entre flèche et label */
 }
 
 .arrow.close {
-    transform: rotate(-90deg); /* quand ouvert, pointe vers le bas */
+    transform: rotate(-90deg);
+    /* quand ouvert, pointe vers le bas */
 }
 
 /* ===========================
    Formulaire paramètres post traitement
    =========================== */
 .traitement-form {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
 }
 
 .param-container {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem; /* espace entre label et input */
-  margin-bottom: 0.5rem; /* espace entre paramètres */
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    /* espace entre label et input */
+    margin-bottom: 0.5rem;
+    /* espace entre paramètres */
 }
 
 .param-label {
-  font-weight: 500;
-  margin-bottom: 0.25rem;
-  color: #94a3b8
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+    color: #94a3b8
 }
 
 .param-input {
-  padding: 0.4rem 0.6rem;
-  font-size: 0.95rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background-color: #7cabbd;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.95rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background-color: #7cabbd;
 }
 
 .checkbox-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
 }
 
 .checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.95rem;
 }
 
 .param-divider {
-  margin-top: 0.5rem;
-  border: none;
-  border-bottom: 1px solid #eee;
+    margin-top: 0.5rem;
+    border: none;
+    border-bottom: 1px solid #eee;
 }
 
 .param-range {
     font-size: 0.8rem;
-    color: #64748b; /* gris bleuté */
+    color: #64748b;
+    /* gris bleuté */
     margin-top: 0.4rem;
     display: block;
 }
 
 .param-choice {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 0.5rem;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-  background-color: #1e293b; /* couleur par défaut proche de la sidebar */
-  color: #94a3b8;
-  font-weight: 500;
-  text-align: center;
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 0.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    background-color: #1e293b;
+    /* couleur par défaut proche de la sidebar */
+    color: #94a3b8;
+    font-weight: 500;
+    text-align: center;
 }
 
 .param-choice.selected {
-  background-color: #3b82f6; /* bleu sélectionné */
-  color: white;
+    background-color: #3b82f6;
+    /* bleu sélectionné */
+    color: white;
 }
 
 .param-choice.disabled {
-  background-color: #334155; /* gris foncé */
-  color: #64748b;
-  cursor: not-allowed;
-  opacity: 0.6;
+    background-color: #334155;
+    /* gris foncé */
+    color: #64748b;
+    cursor: not-allowed;
+    opacity: 0.6;
 }
 
 .param-choice:hover:not(.disabled) {
-  background-color: #2563eb;
+    background-color: #2563eb;
 }
 
 
@@ -883,4 +897,45 @@ canvas {
     .pe-grid {
         grid-template-columns: 1fr !important;
     }
+}
+
+/* IRM Comparison */
+.irm-comparison-container {
+    max-width: 95%;
+    margin: 0 auto;
+    padding: 0 1rem;
+    width: 100%;
+}
+
+.irm-card {
+    border-top: 4px solid var(--primary);
+    position: relative;
+    animation: slideInDown 0.3s ease-out;
+}
+
+@keyframes slideInDown {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+
+.irm-card h2 {
+    color: var(--primary);
+    font-weight: 700;
+}
+
+.irm-card .btn-secondary {
+    font-size: 0.85rem;
+    padding: 0.5rem 1rem;
+}
+
+.irm-card .btn-secondary:hover {
+    background: var(--border-color);
 }
