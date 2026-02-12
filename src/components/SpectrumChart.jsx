@@ -10,7 +10,8 @@ export default function SpectrumChart({ data }) {
         const ctx = canvas.getContext("2d");
         const width = canvas.width;
         const height = canvas.height;
-        const spectrum = data.spectrum;
+        const spectrum = data?.spectrum;
+        if (!spectrum) return;
 
         // Clear
         ctx.clearRect(0, 0, width, height);

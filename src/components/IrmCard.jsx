@@ -1,6 +1,8 @@
 import React, { useMemo, useState, useEffect } from "react";
 import SliceCanvas from "./SliceCanvas";
-import Fusion3D from "./Fusion3D";
+import Brain3D from "./Brain3D";
+import SpectrumChart from "./SpectrumChart";
+import { getData } from "../utils/dataCache";
 
 // Helpers orientation 2D (Moved from App.js if possible or redefined)
 const transpose2D = (m) => {
@@ -91,12 +93,6 @@ const forwardPoint = (x, y, width, height, o = {}) => {
     return { x: px, y: py };
 };
 
-const PLANE_LABEL = {
-    sagittal: "Sagittal",
-    coronal: "Coronal",
-    axial: "Axial",
-};
-
 const ORIENTATION_DEFAULTS = {
     sagittal: { flipY: false, flipX: false, rotate: -90, transpose: false },
     coronal: { flipY: false, flipX: true, rotate: -90, transpose: false },
@@ -104,63 +100,58 @@ const ORIENTATION_DEFAULTS = {
 };
 
 const IrmCard = ({ 
-    results, 
+    irmData, 
+    mrsiData,
     cardId, 
     onDuplicate, 
     onDelete, 
-    renderUploadForm 
+    renderUploadForm,
+    onFetchSpectrum
 }) => {
-    // Initialize state with center indices if results provided
-    const [sliceIndices, setSliceIndices] = useState(() => {
-        if (results?.shape) {
-            return {
-                sagittal: Math.floor(results.shape[0] / 2),
-                coronal: Math.floor(results.shape[1] / 2),
-                axial: Math.floor(results.shape[2] / 2),
-            };
-        }
-        return { sagittal: 0, coronal: 0, axial: 0 };
-    });
+    // --- IRM STATE ---
+    const [sliceIndices, setSliceIndices] = useState({ sagittal: 0, coronal: 0, axial: 0 });
+    const [cursor3D, setCursor3D] = useState({ x: null, y: null, z: null });
+    const [prevIrmData, setPrevIrmData] = useState(null);
 
-    const [cursor3D, setCursor3D] = useState(() => {
-        if (results?.shape) {
-            return {
-                x: Math.floor(results.shape[0] / 2),
-                y: Math.floor(results.shape[1] / 2),
-                z: Math.floor(results.shape[2] / 2),
-            };
-        }
-        return { x: null, y: null, z: null };
-    });
-    const [prevResults, setPrevResults] = useState(results);
-    const orientIRM = ORIENTATION_DEFAULTS;
+    // --- MRSI STATE ---
+    const [mrsiSliceIndex, setMrsiSliceIndex] = useState(0);
+    const [selectedVoxel, setSelectedVoxel] = useState(null);
+    const [currentSpectrum, setCurrentSpectrum] = useState(null);
+    const [prevMrsiData, setPrevMrsiData] = useState(null);
 
-    // Immediate state reset during render when the results object changes
-    // (e.g. new file uploaded or card duplicated)
-    if (results !== prevResults) {
-        setPrevResults(results);
-        if (results?.shape) {
-            const centerX = Math.floor(results.shape[0] / 2);
-            const centerY = Math.floor(results.shape[1] / 2);
-            const centerZ = Math.floor(results.shape[2] / 2);
+    // Sync IRM data changes
+    if (irmData !== prevIrmData) {
+        setPrevIrmData(irmData);
+        if (irmData?.shape) {
+            const centerX = Math.floor(irmData.shape[0] / 2);
+            const centerY = Math.floor(irmData.shape[1] / 2);
+            const centerZ = Math.floor(irmData.shape[2] / 2);
             
-            setSliceIndices({
-                sagittal: centerX,
-                coronal: centerY,
-                axial: centerZ,
-            });
-            setCursor3D({
-                x: centerX,
-                y: centerY,
-                z: centerZ,
-            });
+            setSliceIndices({ sagittal: centerX, coronal: centerY, axial: centerZ });
+            setCursor3D({ x: centerX, y: centerY, z: centerZ });
         }
     }
 
+    // Sync MRSI data changes
+    useEffect(() => {
+        if (mrsiData !== prevMrsiData) {
+            setPrevMrsiData(mrsiData);
+            if (mrsiData?.shape) {
+                setMrsiSliceIndex(Math.floor(mrsiData.shape[2] / 2));
+                setSelectedVoxel(null);
+                setCurrentSpectrum(null);
+            }
+        }
+    }, [mrsiData, prevMrsiData]);
+
+
+    const orientIRM = ORIENTATION_DEFAULTS;
+
+    // --- MEMOIZED IRM SLICES ---
     const sagOriented = useMemo(() => {
-        if (!results?.data_uint8) return null;
-        const [X, Y, Z] = results.shape;
-        const vol = results.data_uint8;
+        const vol = getData(irmData?.dataRef);
+        if (!vol || !irmData?.shape) return null;
+        const [X, Y, Z] = irmData.shape;
         const sx = sliceIndices.sagittal;
         if (sx < 0 || sx >= X) return null;
         const slice = [];
@@ -169,12 +160,12 @@ const IrmCard = ({
             slice.push(vol.subarray(offset, offset + Z));
         }
         return orient2D(slice, orientIRM.sagittal);
-    }, [results?.data_uint8, results?.shape, sliceIndices.sagittal, orientIRM.sagittal]);
+    }, [irmData?.dataRef, irmData?.shape, sliceIndices.sagittal, orientIRM.sagittal]);
 
     const corOriented = useMemo(() => {
-        if (!results?.data_uint8) return null;
-        const [X, Y, Z] = results.shape;
-        const vol = results.data_uint8;
+        const vol = getData(irmData?.dataRef);
+        if (!vol || !irmData?.shape) return null;
+        const [X, Y, Z] = irmData.shape;
         const sy = sliceIndices.coronal;
         if (sy < 0 || sy >= Y) return null;
         const slice = [];
@@ -186,12 +177,12 @@ const IrmCard = ({
             slice.push(row);
         }
         return orient2D(slice, orientIRM.coronal);
-    }, [results?.data_uint8, results?.shape, sliceIndices.coronal, orientIRM.coronal]);
+    }, [irmData?.dataRef, irmData?.shape, sliceIndices.coronal, orientIRM.coronal]);
 
     const axOriented = useMemo(() => {
-        if (!results?.data_uint8) return null;
-        const [X, Y, Z] = results.shape;
-        const vol = results.data_uint8;
+        const vol = getData(irmData?.dataRef);
+        if (!vol || !irmData?.shape) return null;
+        const [X, Y, Z] = irmData.shape;
         const sz = sliceIndices.axial;
         if (sz < 0 || sz >= Z) return null;
         const slice = [];
@@ -203,11 +194,11 @@ const IrmCard = ({
             slice.push(row);
         }
         return orient2D(slice, orientIRM.axial);
-    }, [results?.data_uint8, results?.shape, sliceIndices.axial, orientIRM.axial]);
+    }, [irmData?.dataRef, irmData?.shape, sliceIndices.axial, orientIRM.axial]);
 
     const sliceDims = useMemo(() => {
-        if (!results?.shape) return null;
-        const [X, Y, Z] = results.shape;
+        if (!irmData?.shape) return null;
+        const [X, Y, Z] = irmData.shape;
         const sagDispW = sagOriented?.[0]?.length ?? 0;
         const sagDispH = sagOriented?.length ?? 0;
         const corDispW = corOriented?.[0]?.length ?? 0;
@@ -220,7 +211,40 @@ const IrmCard = ({
             axW: Y, axH: X,
             sagDispW, sagDispH, corDispW, corDispH, axDispW, axDispH
         };
-    }, [results?.shape, sagOriented, corOriented, axOriented]);
+    }, [irmData?.shape, sagOriented, corOriented, axOriented]);
+
+    // --- MEMOIZED MRSI SLICE ---
+    const mrsiSlice = useMemo(() => {
+        if (!mrsiData) {
+            console.log("[IrmCard] mrsiSlice: No mrsiData");
+            return [];
+        } 
+        
+        // Retrieve data from cache if needed
+        let dataUint8 = mrsiData.data_uint8;
+        if (!dataUint8 && mrsiData.dataRef) {
+            dataUint8 = getData(mrsiData.dataRef);
+        }
+
+        if (!dataUint8) {
+             console.log("[IrmCard] mrsiSlice: No data available (checked data_uint8 and dataRef). Keys:", Object.keys(mrsiData));
+             return [];
+        }
+
+        const [X, Y, Z] = mrsiData.shape;
+        const z = mrsiSliceIndex;
+        if (z < 0 || z >= Z) return [];
+        
+        const slice = [];
+        for (let x = 0; x < X; x++) {
+            const manualRow = new Uint8Array(Y);
+            for(let y=0; y<Y; y++) manualRow[y] = dataUint8[(x * Y * Z) + (y * Z) + z];
+            slice.push(manualRow);
+        }
+
+        return slice;
+    }, [mrsiData, mrsiSliceIndex]);
+
 
     const safeNum = (v) => (typeof v === "number" ? v : null);
 
@@ -232,13 +256,68 @@ const IrmCard = ({
         return forwardPoint(x, y, sliceW, sliceH, o);
     };
 
-    if (!results) {
+    const handleVoxelClick = async (xVal, yVal) => {
+        if (!mrsiData?.shape) return;
+        const [X, Y, Z] = mrsiData.shape;
+        // Clamp logic in case canvas scaling is off
+        const x = Math.max(0, Math.min(xVal, X - 1));
+        const y = Math.max(0, Math.min(yVal, Y - 1));
+        const z = mrsiSliceIndex;
+
+        console.log(`[VoxelClick] Raw=${xVal},${yVal} Clamped=${x},${y},${z}, Shape=${mrsiData.shape}`);
+        
+        setSelectedVoxel({ x, y, z });
+        if (onFetchSpectrum && mrsiData?.nom) {
+            const data = await onFetchSpectrum(mrsiData.nom, x, y, z);
+            if (data && data.spectrum) {
+                setCurrentSpectrum(data);
+            } else {
+                console.warn("Invalid spectrum data or error:", data);
+            }
+        }
+    };
+    
+    // Listen to parent for spectrum updates (optional if passed via props, 
+    // but App.js handles fetching and setting `currentSpectrum` in App state for global view.
+    // Ideally we should move spectrum state here or receive it as prop.
+    // For now, App.js uses `fetchSpectrum` which updates `currentSpectrum` in App.js.
+    // Wait, I removed `currentSpectrum` from App.js state!
+    // So `onFetchSpectrum` in App.js needs to return the data, or I handle fetching here.
+    // Let's assume onFetchSpectrum returns the data now? 
+    // Actually, `fetchSpectrum` in App.js was updating local state.
+    // I should move `fetchSpectrum` logic HERE or change `onFetchSpectrum` to return promise.
+    
+    // Changing `onFetchSpectrum` to handle fetching and returning data is cleaner if we want to keep API logic in App or custom hook.
+    // But `App.js` `fetchSpectrum` implementation I see in `App.js` (previous steps) was using `setLoading` and `setError` of App.
+    // Let's try to keep it simple: We passed `onFetchSpectrum` which is `fetchSpectrum` from App.js.
+    // But `fetchSpectrum` in App.js updates `currentSpectrum` state in App.js. 
+    // I removed that state from App.js in the previous step? 
+    // Let me check my previous edit to App.js. 
+    // Yes, I removed `currentSpectrum` state.
+    // So `fetchSpectrum` in App.js will error if it tries to set it.
+    // I need to fix `App.js` -> `fetchSpectrum` to just return data.
+    // AND I need to handle the data here.
+    // I will Assume `onFetchSpectrum` returns the data. I'll need to patch App.js one more time if it doesn't.
+    // Actually, let's just implement `fetchSpectrum` internally here if easy, or use the prop and assume it returns data.
+    // Re-reading App.js: `fetchSpectrum` sets `currentSpectrum`. I deleted `currentSpectrum` state logic.
+    // So I need to patch App.js to return the data instead of setting state.
+
+    // BUT `IrmCard` is being updated right now.
+    // `IrmCard` shouldn't depend on broken parent logic.
+    // I will implement a local wrapper for `onFetchSpectrum` that expects a return value.
+    
+
+    if (!irmData && !mrsiData) {
         return (
             <div className="card irm-card">
                 <div style={{ display: "flex", justifyContent: "flex-end" }}>
                     <button className="btn-secondary" onClick={() => onDelete(cardId)} style={{ color: "var(--danger)" }}>Supprimer</button>
                 </div>
-                {renderUploadForm("IRM", cardId)}
+                <h3>Nouvelle Carte</h3>
+                <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem"}}>
+                    {renderUploadForm("IRM", cardId)}
+                    {renderUploadForm("MRSI", cardId)}
+                </div>
             </div>
         );
     }
@@ -260,81 +339,140 @@ const IrmCard = ({
                     marginBottom: "1rem"
                 }}
             >
-                <h2>Résultats IRM : {results.nom_fichier}</h2>
+                <h2>
+                    {irmData ? `IRM: ${irmData.nom_fichier}` : ""} 
+                    {irmData && mrsiData ? " | " : ""}
+                    {mrsiData ? `MRSI: ${mrsiData.nom}` : ""}
+                </h2>
                 <div style={{ display: "flex", gap: "0.5rem" }}>
-                    <button className="btn-secondary" onClick={() => onDuplicate(results)}>Dupliquer</button>
+                    <button className="btn-secondary" onClick={() => onDuplicate({ irmData, mrsiData })}>Dupliquer</button>
                     <button className="btn-secondary" onClick={() => onDelete(cardId)} style={{ color: "var(--danger)" }}>Supprimer</button>
                 </div>
             </div>
 
-
             <div className="viz-grid">
-                {/* Sagittal */}
-                <div className="slice-control">
-                    <SliceCanvas
-                        data={sagOriented}
-                        title={`Sagittal (X=${sliceIndices.sagittal})`}
-                        onClick={(xDisp, yDisp) => {
-                            const p = inversePoint(xDisp, yDisp, sagDispW, sagDispH, orientIRM.sagittal);
-                            setSliceIndices(prev => ({ ...prev, coronal: p.y, axial: p.x }));
-                            setCursor3D(prev => ({ ...prev, y: p.y, z: p.x }));
-                        }}
-                        crosshair={crosshairXY("sagittal", sagW, sagH, cursor3D?.z, cursor3D?.y)}
-                    />
-                    <input type="range" min="0" max={results.shape[0] - 1} value={sliceIndices.sagittal} onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        setSliceIndices(prev => ({ ...prev, sagittal: val }));
-                        setCursor3D(prev => ({ ...prev, x: val }));
-                    }} className="volume-slider" />
-                </div>
+                {/* --- IRM ROWS --- */}
+                {irmData && (
+                    <>
+                        {/* Sagittal */}
+                        <div className="slice-control">
+                            <SliceCanvas
+                                data={sagOriented}
+                                title={`Sagittal (X=${sliceIndices.sagittal})`}
+                                onClick={(xDisp, yDisp) => {
+                                    const p = inversePoint(xDisp, yDisp, sagDispW, sagDispH, orientIRM.sagittal);
+                                    setSliceIndices(prev => ({ ...prev, coronal: p.y, axial: p.x }));
+                                    setCursor3D(prev => ({ ...prev, y: p.y, z: p.x }));
+                                }}
+                                crosshair={crosshairXY("sagittal", sagW, sagH, cursor3D?.z, cursor3D?.y)}
+                            />
+                            <input type="range" min="0" max={irmData.shape[0] - 1} value={sliceIndices.sagittal} onChange={(e) => {
+                                const val = parseInt(e.target.value, 10);
+                                setSliceIndices(prev => ({ ...prev, sagittal: val }));
+                                setCursor3D(prev => ({ ...prev, x: val }));
+                            }} className="volume-slider" />
+                        </div>
 
-                {/* Coronal */}
-                <div className="slice-control">
-                    <SliceCanvas
-                        data={corOriented}
-                        title={`Coronal (Y=${sliceIndices.coronal})`}
-                        onClick={(xDisp, yDisp) => {
-                            const p = inversePoint(xDisp, yDisp, corDispW, corDispH, orientIRM.coronal);
-                            setSliceIndices(prev => ({ ...prev, sagittal: p.y, axial: p.x }));
-                            setCursor3D(prev => ({ ...prev, x: p.y, z: p.x }));
-                        }}
-                        crosshair={crosshairXY("coronal", corW, corH, cursor3D?.z, cursor3D?.x)}
-                    />
-                    <input type="range" min="0" max={results.shape[1] - 1} value={sliceIndices.coronal} onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        setSliceIndices(prev => ({ ...prev, coronal: val }));
-                        setCursor3D(prev => ({ ...prev, y: val }));
-                    }} className="volume-slider" />
-                </div>
+                        {/* Coronal */}
+                        <div className="slice-control">
+                            <SliceCanvas
+                                data={corOriented}
+                                title={`Coronal (Y=${sliceIndices.coronal})`}
+                                onClick={(xDisp, yDisp) => {
+                                    const p = inversePoint(xDisp, yDisp, corDispW, corDispH, orientIRM.coronal);
+                                    setSliceIndices(prev => ({ ...prev, sagittal: p.y, axial: p.x }));
+                                    setCursor3D(prev => ({ ...prev, x: p.y, z: p.x }));
+                                }}
+                                crosshair={crosshairXY("coronal", corW, corH, cursor3D?.z, cursor3D?.x)}
+                            />
+                            <input type="range" min="0" max={irmData.shape[1] - 1} value={sliceIndices.coronal} onChange={(e) => {
+                                const val = parseInt(e.target.value, 10);
+                                setSliceIndices(prev => ({ ...prev, coronal: val }));
+                                setCursor3D(prev => ({ ...prev, y: val }));
+                            }} className="volume-slider" />
+                        </div>
 
-                {/* Axial */}
-                <div className="slice-control">
-                    <SliceCanvas
-                        data={axOriented}
-                        title={`Axial (Z=${sliceIndices.axial})`}
-                        onClick={(xDisp, yDisp) => {
-                            const p = inversePoint(xDisp, yDisp, axDispW, axDispH, orientIRM.axial);
-                            setSliceIndices(prev => ({ ...prev, sagittal: p.y, coronal: p.x }));
-                            setCursor3D(prev => ({ ...prev, x: p.y, y: p.x }));
-                        }}
-                        crosshair={crosshairXY("axial", axW, axH, cursor3D?.y, cursor3D?.x)}
-                    />
-                    <input type="range" min="0" max={results.shape[2] - 1} value={sliceIndices.axial} onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        setSliceIndices(prev => ({ ...prev, axial: val }));
-                        setCursor3D(prev => ({ ...prev, z: val }));
-                    }} className="volume-slider" />
-                </div>
+                        {/* Axial */}
+                        <div className="slice-control">
+                            <SliceCanvas
+                                data={axOriented}
+                                title={`Axial (Z=${sliceIndices.axial})`}
+                                onClick={(xDisp, yDisp) => {
+                                    const p = inversePoint(xDisp, yDisp, axDispW, axDispH, orientIRM.axial);
+                                    setSliceIndices(prev => ({ ...prev, sagittal: p.y, coronal: p.x }));
+                                    setCursor3D(prev => ({ ...prev, x: p.y, y: p.x }));
+                                }}
+                                crosshair={crosshairXY("axial", axW, axH, cursor3D?.y, cursor3D?.x)}
+                            />
+                            <input type="range" min="0" max={irmData.shape[2] - 1} value={sliceIndices.axial} onChange={(e) => {
+                                const val = parseInt(e.target.value, 10);
+                                setSliceIndices(prev => ({ ...prev, axial: val }));
+                                setCursor3D(prev => ({ ...prev, z: val }));
+                            }} className="volume-slider" />
+                        </div>
 
-                <div className="slice-control" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: "350px" }}>
-                    <div style={{ flex: 1, width: "100%", minHeight: "300px", background: "black", borderRadius: "4px", overflow: "hidden" }}>
-                        <Fusion3D irmData={results} cursor3D={cursor3D} />
-                    </div>
-                    <span className="slice-label" style={{ marginTop: "0.5rem" }}>3D Brain Preview</span>
-                </div>
+                        {/* 3D Brain */}
+                        <div className="slice-control" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: "350px" }}>
+                            <div style={{ flex: 1, width: "100%", minHeight: "300px", background: "black", borderRadius: "4px", overflow: "hidden" }}>
+                                <Brain3D 
+                                    irmData={{
+                                        ...irmData,
+                                        data_uint8: getData(irmData.dataRef)
+                                    }} 
+                                    cursor3D={cursor3D} 
+                                />
+                            </div>
+                            <span className="slice-label" style={{ marginTop: "0.5rem" }}>3D Brain Preview</span>
+                        </div>
+                    </>
+                )}
+                
+                {/* --- MRSI ROWS --- */}
+                {mrsiData && (
+                    <>
+                         <div className="slice-control">
+                            <SliceCanvas
+                                data={mrsiSlice}
+                                title={`MRSI Slice (Z=${mrsiSliceIndex})`}
+                                onClick={(x, y) => {
+                                    handleVoxelClick(x, y);
+                                }}
+                                selectedVoxel={selectedVoxel}
+                                isMRSI={true}
+                            />
+                             <input type="range" min="0" max={mrsiData.shape[2] - 1} value={mrsiSliceIndex} onChange={(e) => {
+                                const val = parseInt(e.target.value, 10);
+                                setMrsiSliceIndex(val);
+                            }} className="volume-slider" />
+                        </div>
+                        
+                        {/* Spectrum Chart */}
+                         <div className="slice-control" style={{ gridColumn: "span 2" }}> 
+                             {currentSpectrum ? (
+                                <SpectrumChart data={currentSpectrum} />
+                             ) : (
+                                 <div style={{display: "flex", alignItems: "center", justifyContent: "center", height: "100%", background: "#f8f9fa", borderRadius: "8px", border: "1px dashed #ccc"}}>
+                                     <p>Sélectionnez un voxel sur la carte MRSI pour voir le spectre</p>
+                                 </div>
+                             )}
+                        </div>
+                    </>
+                )}
+                
+                {/* --- UPLOAD FORMS IF MISSING DATA --- */}
+                {!irmData && (
+                     <div className="slice-control card">
+                         {renderUploadForm("IRM", cardId)}
+                     </div>
+                )}
+                {!mrsiData && (
+                     <div className="slice-control card">
+                         {renderUploadForm("MRSI", cardId)}
+                     </div>
+                )}
             </div>
         </div>
     );
 };
 
-export default IrmCard;
+export default React.memo(IrmCard);

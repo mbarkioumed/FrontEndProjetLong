@@ -4,22 +4,66 @@ import "./App.css";
 import AuthContext from "./context/AuthContext";
 import Login from "./components/Login";
 import SliceCanvas from "./components/SliceCanvas";
-import Fusion3D from "./components/Fusion3D"; // New 3D View import
-import FusionViewer from "./components/FusionViewer";
+
 import SpectrumChart from "./components/SpectrumChart";
 import PatientsExplorer from "./components/PatientsExplorer";
 import IrmCard from "./components/IrmCard";
 
 import { api } from "./api/client";
 
-const base64ToUint8Array = (base64) => {
-    const binaryString = window.atob(base64);
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
+import { storeData } from "./utils/dataCache";
+
+const worker = new Worker(new URL("./dataProcessor.worker.js", import.meta.url));
+
+const workerService = {
+    requestId: 0,
+    callbacks: new Map(),
+
+    postMessage: (message) => {
+        const id = ++workerService.requestId;
+        return new Promise((resolve, reject) => {
+            workerService.callbacks.set(id, { resolve, reject });
+            worker.postMessage({ ...message, id });
+        });
     }
-    return bytes;
+};
+
+worker.onmessage = (e) => {
+    const { id, success, data, error } = e.data;
+    const callback = workerService.callbacks.get(id);
+
+    if (callback) {
+        if (success) {
+            // Intercept and cache large data BEFORE it hits React
+            if (data) {
+                 const processNode = (node) => {
+                    if (!node) return;
+                    if (node.data_uint8) {
+                        node.dataRef = storeData(node.data_uint8);
+                        node.data_uint8 = null; // Remove heavy data
+                        delete node.data_uint8;
+                    }
+                    // Recursive check not strictly needed if structure is flat, 
+                    // but results might be nested in 'irmcards' or similar? 
+                    // The worker returns 'data' which is usually the result object directly or { [filename]: result }.
+                    // Let's iterate object values to be safe
+                    if (typeof node === 'object') {
+                        Object.values(node).forEach(child => {
+                            if (typeof child === 'object' && child !== null) {
+                                // Depth-1 check is usually enough for our structure
+                                if (child.data_uint8) processNode(child); 
+                            }
+                        });
+                    }
+                 };
+                 processNode(data);
+            }
+            callback.resolve(data);
+        } else {
+            callback.reject(new Error(error));
+        }
+        workerService.callbacks.delete(id);
+    }
 };
 
 
@@ -53,7 +97,7 @@ function App() {
     const [isParamOpen, setIsParamOpen] = useState(true);
 
     const [irmCards, setIrmCards] = useState([
-        { id: Date.now(), results: null }
+        { id: Date.now(), irmData: null, mrsiData: null }
     ]);
 
     const [theme, setTheme] = useState(
@@ -116,14 +160,7 @@ function App() {
 
     /* FIN POST TRAITEMENT CHOIX */ 
 
-    // Navigation 3D
-    const [sliceIndices, setSliceIndices] = useState({
-        mrsi: 0,
-    });
 
-    // MRSI Interaction
-    const [selectedVoxel, setSelectedVoxel] = useState(null);
-    const [currentSpectrum, setCurrentSpectrum] = useState(null);
 
     // ===============================
     // Optimization: Efficient Slicing from Flat Uint8Array
@@ -169,6 +206,7 @@ function App() {
 
         try {
             const endpoint = type === "IRM" ? "/upload-irm/" : "/upload-mrsi/";
+
             const response = await fetch(`${API_URL}${endpoint}`, {
                 method: "POST",
                 headers: {
@@ -178,45 +216,65 @@ function App() {
             });
 
             if (!response.ok) throw new Error(`Erreur ${response.status}`);
+            
+            // Get as Blob/Text to avoid parsing JSON on main thread
+            const blob = await response.blob();
+            
+            // Now send to worker for parsing/processing
+            // I need to update the worker to accept "raw data" processing requests too, 
+            // OR I just use a data url? No that's for small things.
+            
+            // I should have made the worker more flexible.
+            // Let's RE-WRITE the worker to be more flexible first? 
+            // No, I can just use the `url` param in worker to be a Blob URL? 
+            // `fetch(blobUrl)` works! 
+            
+            // Brilliant. I will create a Blob URL for the response blob.
+            const blobUrl = URL.createObjectURL(blob);
+            
+            const data = await workerService.postMessage({
+                url: blobUrl,
+                options: {}, 
+                type: "process" // effectively just fetch and process
+            });
+            
+            URL.revokeObjectURL(blobUrl);
 
-            const data = await response.json();
-            if (data?.error) throw new Error(data.error);
-
-            // Initialisation des indices au centre pour l'IRM
+            // ... rest of logic
+            
             if (data.type === "IRM") {
-                if (data.data_b64) {
-                    data.data_uint8 = base64ToUint8Array(data.data_b64);
-                }
-                setIrmResults(data);
-                setReference3DData(data); // Initialize 3D view with original data
-                
-                if (cardId) {
-                    setIrmCards(prev => prev.map(c => c.id === cardId ? { ...c, results: data } : c));
-                } else {
-                    // Update the first empty card or add new one
-                    setIrmCards(prev => {
-                        const firstEmpty = prev.find(c => !c.results);
-                        if (firstEmpty) {
-                            return prev.map(c => c.id === firstEmpty.id ? { ...c, results: data } : c);
-                        } else {
-                            return [...prev, { id: Date.now(), results: data }];
-                        }
-                    });
-                }
-                setView("irm");
+                 setIrmResults(data); // cleaning up this legacy state later?
+                 setReference3DData(data);
+                 if (cardId) {
+                     setIrmCards(prev => prev.map(c => c.id === cardId ? { ...c, irmData: data } : c));
+                 } else {
+                     setIrmCards(prev => {
+                         const firstEmpty = prev.find(c => !c.irmData);
+                         if (firstEmpty) {
+                             return prev.map(c => c.id === firstEmpty.id ? { ...c, irmData: data } : c);
+                         } else {
+                             return [...prev, { id: Date.now(), irmData: data, mrsiData: null }];
+                         }
+                     });
+                 }
+                 setView("irm");
             } else if (data.type === "MRSI") {
-                if (data.data_b64) {
-                    data.data_uint8 = base64ToUint8Array(data.data_b64);
+                // setMrsiResults(data); // Legacy state removed
+                if (cardId) {
+                    setIrmCards(prev => prev.map(c => c.id === cardId ? { ...c, mrsiData: data } : c));
+                } else {
+                     setIrmCards(prev => {
+                         const firstEmpty = prev.find(c => !c.mrsiData);
+                         if (firstEmpty) {
+                             return prev.map(c => c.id === firstEmpty.id ? { ...c, mrsiData: data } : c);
+                         } else {
+                             return [...prev, { id: Date.now(), irmData: null, mrsiData: data }];
+                         }
+                     });
                 }
-                setMrsiResults(data);
-                setSliceIndices((prev) => ({
-                    ...prev,
-                    mrsi: Math.floor(data.shape[2] / 2),
-                }));
-                setSelectedVoxel(null);
-                setCurrentSpectrum(null);
-                setView("mrsi");
+                setView("irm"); // MRSI stays in IRM view now
             }
+
         } catch (err) {
             setError(`Erreur lors de l'envoi : ${err.message}`);
         } finally {
@@ -224,59 +282,93 @@ function App() {
         }
     };
     const openExamFromPatients = async ({ irmFiles, mrsiFile, meta }) => {
-  setLoading(true);
-  setError("");
+        setLoading(true);
+        setError("");
 
-  try {
-    // 1) Choisir une IRM par défaut
-    const irmFile = irmFiles && irmFiles.length ? irmFiles[0] : null;
+        try {
+            // 1) Choisir une IRM par défaut
+            const irmFile = irmFiles && irmFiles.length ? irmFiles[0] : null;
+            let irmData = null;
 
-    if (irmFile) {
-      const irmData = await api.uploadIRMFile(irmFile, token);
-      if (irmData.data_b64) {
-        irmData.data_uint8 = base64ToUint8Array(irmData.data_b64);
-      }
-      setIrmResults(irmData);
-      setReference3DData(irmData);
-      setIrmCards([{ id: Date.now(), results: irmData }]);
-    }
+            if (irmFile) {
+                const formData = new FormData();
+                formData.append("fichier", irmFile);
+                
+                const response = await fetch(`${API_URL}/upload-irm/`, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${token}` },
+                    body: formData
+                });
+                
+                if (!response.ok) throw new Error("Erreur upload IRM");
+                
+                const blob = await response.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                
+                irmData = await workerService.postMessage({
+                    url: blobUrl,
+                    options: {},
+                    type: "process"
+                });
+                URL.revokeObjectURL(blobUrl);
 
-    if (mrsiFile) {
-      const mrsiData = await api.uploadMRSIFile(mrsiFile, token);
-      if (mrsiData.data_b64) {
-        mrsiData.data_uint8 = base64ToUint8Array(mrsiData.data_b64);
-      }
-      setMrsiResults(mrsiData);
-      setSliceIndices((prev) => ({
-        ...prev,
-        mrsi: Math.floor(mrsiData.shape[2] / 2),
-      }));
-      setSelectedVoxel(null);
-      setCurrentSpectrum(null);
-    }
+                setIrmResults(irmData);
+                setReference3DData(irmData);
+                setIrmCards([{ id: Date.now(), irmData: irmData, mrsiData: null }]);
+            }
 
-    // 2) Aller à la vue fusion si possible, sinon IRM
-    if (irmFile && mrsiFile) setView("fusion");
-    else if (irmFile) setView("irm");
-    else if (mrsiFile) setView("mrsi");
-    else setView("patients");
-  } catch (e) {
-    setError(`Ouverture examen impossible : ${e.message}`);
-  } finally {
-    setLoading(false);
-  }
-};
+            if (mrsiFile) {
+                const formData = new FormData();
+                formData.append("fichier", mrsiFile);
+                
+                const response = await fetch(`${API_URL}/upload-mrsi/`, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${token}` },
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error("Erreur upload MRSI");
+
+                const blob = await response.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                
+                const mrsiData = await workerService.postMessage({
+                    url: blobUrl,
+                    options: {},
+                    type: "process"
+                });
+                URL.revokeObjectURL(blobUrl);
+
+                // If we also loaded IRM, update that card, otherwise new card
+                if (irmFile && irmData) {
+                     setIrmCards(prev => {
+                         // assume it's the last one we just added
+                         const last = prev[prev.length - 1];
+                         return prev.map(c => c.id === last.id ? { ...c, mrsiData: mrsiData } : c);
+                     });
+                } else {
+                     setIrmCards([{ id: Date.now(), irmData: null, mrsiData: mrsiData }]);
+                }
+            }
+
+            // 2) Always go to IRM view
+            if (irmFile || mrsiFile) setView("irm");
+            else setView("patients");
+        } catch (e) {
+            setError(`Ouverture examen impossible : ${e.message}`);
+        } finally {
+            setLoading(false);
+        }
+    };
 
 
 
 
 
-    const fetchSpectrum = async (name, x, y, zVal = null) => {
-        const z = zVal !== null ? zVal : sliceIndices.mrsi;
-        if (x == null || y == null) return;
+    const fetchSpectrum = async (name, x, y, z) => {
+        if (x == null || y == null || z == null) return null;
         setLoading(true);
         try {
-            
             const res = await fetch(`${API_URL}/spectrum/${name}/${x}/${y}/${z}`, {
                 headers: {
                     Authorization: `Bearer ${token}`,
@@ -284,12 +376,11 @@ function App() {
             });
             if (!res.ok) throw new Error("Erreur affichage spectre");
             const data = await res.json();
-
-            setSelectedVoxel({ x, y, z });
-            setCurrentSpectrum(data);
+            return data;
         } catch (err) {
             console.error(err);
             setError("Impossible de charger le spectre.");
+            return null;
         } finally {
             setLoading(false);
         }
@@ -321,47 +412,50 @@ function App() {
                 },
             };
 
-            const response = await fetch(`${API_URL}/traitements`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                },
-                body: JSON.stringify(bodyPayload),
+            console.time("Worker Request");
+            const data = await workerService.postMessage({
+                url: `${API_URL}/traitements`,
+                options: {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                    },
+                    body: JSON.stringify(bodyPayload)
+                }
             });
-
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) {
-                throw new Error(data?.detail || `Erreur ${response.status}`);
-            }
-
-            if (data?.error) throw new Error(data.error);
+            console.timeEnd("Worker Request");
 
             const next = data?.[key];
             if (!next) throw new Error("Réponse traitement inattendue.");
             if (next?.error) throw new Error(next.error);
 
-            if (next.data_b64) {
-                next.data_uint8 = base64ToUint8Array(next.data_b64);
-            }
+            // Data processing (base64 -> Uint8Array) is already done by worker!
 
+            console.time("State Update");
             if (next.type === "IRM") {
                 setIrmResults(next);
-                setIrmCards(prev => prev.map((c, i) => i === 0 ? { ...c, results: next } : c));
+                setIrmCards(prev => {
+                    console.time("SetIrmCards Callback");
+                    const newCards = prev.map((c, i) => i === 0 ? { ...c, irmData: next } : c);
+                    console.timeEnd("SetIrmCards Callback");
+                    return newCards;
+                });
                 setView("irm");
             } else if (next.type === "MRSI") {
-                setMrsiResults(next);
-                setSliceIndices((prev) => ({
-                    ...prev,
-                    mrsi: Math.floor(next.shape[2] / 2),
-                }));
-                setSelectedVoxel(null);
-                setCurrentSpectrum(null);
-                setView("mrsi");
+                // setMrsiResults(next);
+                 setIrmCards(prev => {
+                    // Update first card for now, or find card matching this MRSI? 
+                    // Post-traitement context might need to know which card triggered it. 
+                    // For now, default to first card update if generic.
+                    return prev.map((c, i) => i === 0 ? { ...c, mrsiData: next } : c);
+                });
+                setView("irm");
             }
             else {
                 setIrmResults(next);
             }
+            console.timeEnd("State Update");
         } catch (err) {
             setError(`Erreur Post-Traitement : ${err.message}`);
         } finally {
@@ -426,106 +520,7 @@ function App() {
 
 
     const renderResults = (results) => {
-        if (!results) return null;
-
-        if (results.type === "IRM") {
-            // IRM results are now handled by IrmCard component in the main render loop
-            return null;
-        }
-
-        if (results.type === "MRSI") {
-            return (
-                <div className="card">
-                    <h2>Résultats MRSI : {results.nom}</h2>
-                    
-                    <p className="instruction">
-                        Utilisez le slider pour changer de coupe, puis cliquez
-                        sur un voxel pour voir son spectre.
-                    </p>
-                    <div className="mrsi-layout">
-                        <div className="viz-grid single">
-                            <div className="slice-control">
-                                <SliceCanvas
-                                    data={(() => {
-                                        if (!results.data_uint8) return null;
-                                        const [X, Y, Z] = results.shape;
-                                        const z = sliceIndices.mrsi;
-                                        const slice = [];
-                                        for (let x = 0; x < X; x++) {
-                                            // Manual extraction for non-contiguous axis (Z is deepest)
-                                            // Need manual extraction.
-                                            const manualRow = new Uint8Array(Y);
-                                            for(let y=0; y<Y; y++) manualRow[y] = results.data_uint8[(x * Y * Z) + (y * Z) + z];
-                                            slice.push(manualRow);
-                                        }
-                                        return slice;
-                                    })()}
-                                    title={`Voxel Map (Z=${sliceIndices.mrsi})`}
-                                    onClick={(x, y) => fetchSpectrum(results.nom, x, y)}
-                                    selectedVoxel={selectedVoxel}
-                                    isMRSI={true}
-                                />
-                                <div className="slice-selector">
-                                    <label htmlFor="mrsi-z-select">
-                                        Sélectionner la coupe Z :{" "}
-                                    </label>
-                                    <select
-                                        id="mrsi-z-select"
-                                        value={sliceIndices.mrsi}
-                                        onChange={(e) => {
-                                            const newZ = parseInt(
-                                                e.target.value,
-                                                10,
-                                            );
-                                            setSliceIndices((prev) => ({
-                                                ...prev,
-                                                mrsi: newZ,
-                                            }));
-                                            if (selectedVoxel)
-                                                fetchSpectrum(
-                                                    results.nom,
-                                                    selectedVoxel.x,
-                                                    selectedVoxel.y,
-                                                    newZ,
-                                                );
-                                        }}
-                                        className="form-select"
-                                    >
-                                        {[
-                                            ...Array(results.shape[2]).keys(),
-                                        ].map((z) => (
-                                            <option key={z} value={z}>
-                                                Coupe {z}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-
-                        {currentSpectrum && (
-                            <SpectrumChart data={currentSpectrum} />
-                        )}
-                    </div>
-
-                    <div
-                        style={{
-                            marginTop: "1.5rem",
-                            color: "var(--text-muted)",
-                        }}
-                    >
-                        Méthode : {results.method} | Shape :{" "}
-                        {results.shape.join(" x ")}
-                    </div>
-                </div>
-            );
-        }
-
-        return (
-            <div className="card">
-                <pre>{JSON.stringify(results, null, 2)}</pre>
-            </div>
-        );
+        return null; // Logic moved to IrmCard
     };
 
     if (authLoading) return <div className="loading-screen">Chargement...</div>;
@@ -562,20 +557,8 @@ function App() {
                         <span className="icon">🧠</span>
                         <span className="label">Upload IRM</span>
                     </div>
-                    <div
-                        className={`nav-item ${view === "mrsi" ? "active" : ""}`}
-                        onClick={() => setView("mrsi")}
-                    >
-                        <span className="icon">📊</span>
-                        <span className="label">Upload MRSI</span>
-                    </div>
-                    <div
-                        className={`nav-item ${view === "fusion" ? "active" : ""}`}
-                        onClick={() => setView("fusion")}
-                    >
-                        <span className="icon">🔬</span>
-                        <span className="label">Test Fusion</span>
-                    </div>
+
+
                     <div
                         className={`nav-item ${view === "patients" ? "active" : ""}`}
                         onClick={() => setView("patients")}
@@ -646,11 +629,16 @@ function App() {
                             <IrmCard 
                                 key={card.id}
                                 cardId={card.id}
-                                results={card.results}
-                                onDuplicate={(results) => {
+                                irmData={card.irmData}
+                                mrsiData={card.mrsiData}
+                                onDuplicate={(data) => {
                                     setIrmCards(prev => {
                                         const index = prev.findIndex(c => c.id === card.id);
-                                        const newCard = { id: Date.now(), results: { ...results } };
+                                        const newCard = { 
+                                            id: Date.now(), 
+                                            irmData: card.irmData ? { ...card.irmData } : null, 
+                                            mrsiData: card.mrsiData ? { ...card.mrsiData } : null 
+                                        };
                                         const newCards = [...prev];
                                         newCards.splice(index + 1, 0, newCard);
                                         return newCards;
@@ -658,17 +646,18 @@ function App() {
                                 }}
                                 onDelete={(id) => {
                                     setIrmCards(prev => {
-                                        if (prev.length === 1) return [{ id: Date.now(), results: null }];
+                                        if (prev.length === 1) return [{ id: Date.now(), irmData: null, mrsiData: null }];
                                         return prev.filter(c => c.id !== id);
                                     });
                                 }}
                                 renderUploadForm={renderUploadForm}
+                                onFetchSpectrum={fetchSpectrum}
                             />
                         ))}
                         <button 
                             className="btn-primary" 
                             style={{ alignSelf: "center", padding: "1rem 2rem", fontSize: "1.1rem" }}
-                            onClick={() => setIrmCards(prev => [...prev, { id: Date.now(), results: null }])}
+                            onClick={() => setIrmCards(prev => [...prev, { id: Date.now(), irmData: null, mrsiData: null }])}
                         >
                             + Ajouter une nouvelle carte de comparaison
                         </button>
@@ -676,18 +665,12 @@ function App() {
                 )}
                 {view === "mrsi" && (
                     <>
-                        {renderUploadForm("MRSI")}
-                        {renderResults(mrsiResults)}
+                         {renderUploadForm("MRSI")}
+                         {/* Removed renderResults call */}
                     </>
                 )}
                 
-                {view === "fusion" && (
-                     <FusionViewer 
-                        irmData={irmResults} 
-                        mrsiData={mrsiResults} 
-                        onVoxelClick={(x,y,z) => fetchSpectrum(mrsiResults.nom,x,y,z)} 
-                     />
-                )}
+
 
                 {view === "patients" && <PatientsExplorer onOpenExam={openExamFromPatients} />}
 

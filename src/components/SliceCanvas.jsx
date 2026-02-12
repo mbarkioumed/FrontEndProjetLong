@@ -46,15 +46,21 @@ const SliceCanvas = ({
         return [r * 255, g * 255, b * 255];
     };
 
+    const height = data?.length || 0;
+    const width = data?.[0]?.length || 0;
+
     useEffect(() => {
         if (!canvasRef.current || !data) return;
 
         const canvas = canvasRef.current;
         const ctx = canvas.getContext("2d", { alpha: false }); // Optimization: disable alpha if not needed
-        const height = data.length;
-        const width = data[0].length;
+        
+        console.log(`[SliceCanvas] Data dims: ${width}x${height}, Canvas dims before: ${canvas.width}x${canvas.height}`);
+
+        if (width === 0 || height === 0) return;
 
         if (canvas.width !== width || canvas.height !== height) {
+            // Updated via props, but double check
             canvas.width = width;
             canvas.height = height;
         }
@@ -149,8 +155,15 @@ const SliceCanvas = ({
             <span className="slice-label">{title}</span>
             <canvas
                 ref={canvasRef}
+                width={width}
+                height={height}
                 onClick={handleClick}
-                style={{ cursor: onClick ? "crosshair" : "default" }}
+                style={{ 
+                    cursor: onClick ? "crosshair" : "default",
+                    width: "100%", 
+                    height: "100%",
+                    imageRendering: "pixelated"
+                }}
             />
         </div>
     );
