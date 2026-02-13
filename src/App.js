@@ -3,870 +3,990 @@ import { useContext } from "react";
 import "./App.css";
 import AuthContext from "./context/AuthContext";
 import Login from "./components/Login";
-import SliceCanvas from "./components/SliceCanvas";
-
-import SpectrumChart from "./components/SpectrumChart";
 import PatientsExplorer from "./components/PatientsExplorer";
 import IrmCard from "./components/IrmCard";
-
-import { api } from "./api/client";
 
 import { storeData } from "./utils/dataCache";
 
 const worker = new Worker(new URL("./dataProcessor.worker.js", import.meta.url));
 
 const workerService = {
-    requestId: 0,
-    callbacks: new Map(),
+  requestId: 0,
+  callbacks: new Map(),
 
-    postMessage: (message) => {
-        const id = ++workerService.requestId;
-        return new Promise((resolve, reject) => {
-            workerService.callbacks.set(id, { resolve, reject });
-            worker.postMessage({ ...message, id });
-        });
-    }
+  postMessage: (message) => {
+    const id = ++workerService.requestId;
+    return new Promise((resolve, reject) => {
+      workerService.callbacks.set(id, { resolve, reject });
+      worker.postMessage({ ...message, id });
+    });
+  },
 };
 
 worker.onmessage = (e) => {
-    const { id, success, data, error } = e.data;
-    const callback = workerService.callbacks.get(id);
+  const { id, success, data, error } = e.data;
+  const callback = workerService.callbacks.get(id);
 
-    if (callback) {
-        if (success) {
-            // Intercept and cache large data BEFORE it hits React
-            if (data) {
-                 const processNode = (node) => {
-                    if (!node) return;
-                    if (node.data_uint8) {
-                        node.dataRef = storeData(node.data_uint8);
-                        node.data_uint8 = null; // Remove heavy data
-                        delete node.data_uint8;
-                    }
-                    // Recursive check not strictly needed if structure is flat, 
-                    // but results might be nested in 'irmcards' or similar? 
-                    // The worker returns 'data' which is usually the result object directly or { [filename]: result }.
-                    // Let's iterate object values to be safe
-                    if (typeof node === 'object') {
-                        Object.values(node).forEach(child => {
-                            if (typeof child === 'object' && child !== null) {
-                                // Depth-1 check is usually enough for our structure
-                                if (child.data_uint8) processNode(child); 
-                            }
-                        });
-                    }
-                 };
-                 processNode(data);
-            }
-            callback.resolve(data);
-        } else {
-            callback.reject(new Error(error));
+  if (!callback) return;
+
+  if (success) {
+    // Intercept and cache large data BEFORE it hits React
+    if (data) {
+      const processNode = (node) => {
+        if (!node) return;
+
+        // If worker returned heavy bytes, cache them and remove them
+        if (node.data_uint8) {
+          node.dataRef = storeData(node.data_uint8);
+          node.data_uint8 = null;
+          delete node.data_uint8;
         }
-        workerService.callbacks.delete(id);
-    }
-};
 
+        // Defensive: recurse through object values (nested results)
+        if (typeof node === "object" && node !== null) {
+          Object.values(node).forEach((child) => {
+            if (typeof child === "object" && child !== null) {
+              if (child.data_uint8) processNode(child);
+            }
+          });
+        }
+      };
+      processNode(data);
+    }
+    callback.resolve(data);
+  } else {
+    callback.reject(new Error(error));
+  }
+
+  workerService.callbacks.delete(id);
+};
 
 const API_URL = "http://127.0.0.1:8000";
 
+function App() {
+  const { user, token, logout, loading: authLoading } = useContext(AuthContext);
 
-// ===============================
-// UI Debug orientation (facultatif mais pratique)
-// ===============================
-const PLANE_LABEL = {
-    sagittal: "Sagittal",
-    coronal: "Coronal",
-    axial: "Axial",
+  const [view, setView] = useState("home");
+  const [backendStatus, setBackendStatus] = useState(false);
+
+  // Global UI (upload, general messages)
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  // ✅ Per-card job state for parallel post-processing
+  // { [cardId]: { loading: boolean, error: string|null } }
+  const [cardJobs, setCardJobs] = useState({});
+
+  // (Legacy global results kept to avoid breaking other parts)
+  const [irmResults, setIrmResults] = useState(null);
+  const [reference3DData, setReference3DData] = useState(null);
+  const [mrsiResults, setMrsiResults] = useState(null);
+
+  const [isTraitementOpen, setIsTraitementOpen] = useState(false);
+  const [isParamOpen, setIsParamOpen] = useState(true);
+
+  // ===============================
+  // ✅ Comparison cards + active card
+  // ===============================
+  const [irmCards, setIrmCards] = useState([
+    { id: Date.now(), irmData: null, mrsiData: null, irmHistory: [], mrsiHistory: [] },
+  ]);
+
+  const [activeCardId, setActiveCardId] = useState(null);
+
+  useEffect(() => {
+    if (!activeCardId && irmCards.length > 0) {
+      setActiveCardId(irmCards[0].id);
+      return;
+    }
+    if (activeCardId && !irmCards.some((c) => c.id === activeCardId)) {
+      setActiveCardId(irmCards[0]?.id ?? null);
+    }
+  }, [irmCards, activeCardId]);
+
+  const activeCard = useMemo(() => {
+    return irmCards.find((c) => c.id === activeCardId) || irmCards[0] || null;
+  }, [irmCards, activeCardId]);
+
+  // Per-card helpers
+  const setCardLoading = (cardId, value) => {
+    setCardJobs((prev) => ({
+      ...prev,
+      [cardId]: { ...(prev[cardId] || {}), loading: value },
+    }));
+  };
+
+  const setCardError = (cardId, msg) => {
+    setCardJobs((prev) => ({
+      ...prev,
+      [cardId]: { ...(prev[cardId] || {}), error: msg },
+    }));
+  };
+
+  // ===============================
+  // ✅ History helpers (versions)
+  // ===============================
+  const ensureHistoryInit = (card) => ({
+    ...card,
+    irmHistory:
+      card.irmHistory ||
+      (card.irmData
+        ? [{ id: "base", label: "Original", data: { ...card.irmData, __versionId: "base" }, createdAt: Date.now() }]
+        : []),
+    mrsiHistory:
+      card.mrsiHistory ||
+      (card.mrsiData
+        ? [{ id: "base", label: "Original", data: { ...card.mrsiData, __versionId: "base" }, createdAt: Date.now() }]
+        : []),
+  });
+const pushVersionToCard = (cardId, type, versionLabel, nextData) => {
+  const versionId = `t_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+  setIrmCards((prev) =>
+    prev.map((c) => {
+      if (c.id !== cardId) return c;
+
+      const current = type === "IRM" ? c.irmData : c.mrsiData;
+      const backendKey = current?.__backendKey;
+
+      const tagged = {
+        ...nextData,
+        __versionId: versionId,
+        __backendKey: backendKey, // ✅ super important
+      };
+
+      if (type === "IRM") {
+        const irmHistory = [...(c.irmHistory || []), { id: versionId, label: versionLabel, data: tagged, createdAt: Date.now() }];
+        return { ...c, irmHistory, irmData: tagged };
+      }
+
+      const mrsiHistory = [...(c.mrsiHistory || []), { id: versionId, label: versionLabel, data: tagged, createdAt: Date.now() }];
+      return { ...c, mrsiHistory, mrsiData: tagged };
+    })
+  );
 };
 
-function App() {
-    const {
-        user,
-        token,
-        logout,
-        loading: authLoading,
-    } = useContext(AuthContext);
-    const [view, setView] = useState("home");
-    const [backendStatus, setBackendStatus] = useState(false);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState("");
-    const [irmResults, setIrmResults] = useState(null);
-    const [reference3DData, setReference3DData] = useState(null); // Stable data for 3D View
-    const [mrsiResults, setMrsiResults] = useState(null);
-    const [isTraitementOpen, setIsTraitementOpen] = useState(false);
-    const [isParamOpen, setIsParamOpen] = useState(true);
-
-    const [irmCards, setIrmCards] = useState([
-        { id: Date.now(), irmData: null, mrsiData: null }
-    ]);
-
-    const [theme, setTheme] = useState(
-        () => localStorage.getItem("theme") || "light",
+  const selectIrmVersion = (cardId, versionId) => {
+    setIrmCards((prev) =>
+      prev.map((c) => {
+        if (c.id !== cardId) return c;
+        const card = ensureHistoryInit(c);
+        const found = (card.irmHistory || []).find((v) => v.id === versionId);
+        if (!found) return card;
+        const tagged = { ...found.data, __versionId: found.id };
+        return { ...card, irmData: tagged };
+      }),
     );
-    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
-        () => localStorage.getItem("sidebarCollapsed") === "true",
+  };
+
+  const selectMrsiVersion = (cardId, versionId) => {
+    setIrmCards((prev) =>
+      prev.map((c) => {
+        if (c.id !== cardId) return c;
+        const card = ensureHistoryInit(c);
+        const found = (card.mrsiHistory || []).find((v) => v.id === versionId);
+        if (!found) return card;
+        const tagged = { ...found.data, __versionId: found.id };
+        return { ...card, mrsiData: tagged };
+      }),
     );
-    const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(
-        () => localStorage.getItem("rightSidebarCollapsed") === "true",
-    );
+  };
 
-    useEffect(() => {
-        localStorage.setItem("sidebarCollapsed", isSidebarCollapsed);
-    }, [isSidebarCollapsed]);
+  // ===============================
+  // Theme / Layout
+  // ===============================
+  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "light");
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
+    () => localStorage.getItem("sidebarCollapsed") === "true",
+  );
+  const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(
+    () => localStorage.getItem("rightSidebarCollapsed") === "true",
+  );
 
-    useEffect(() => {
-        localStorage.setItem("rightSidebarCollapsed", isRightSidebarCollapsed);
-    }, [isRightSidebarCollapsed]);
+  useEffect(() => {
+    localStorage.setItem("sidebarCollapsed", isSidebarCollapsed);
+  }, [isSidebarCollapsed]);
 
-    /* POST TRAITEMENT CHOIX */ 
-    const [catalog, setCatalog] = useState({});
-    const [selectedTraitement, setSelectedTraitement] = useState("");
-    const [traitementParams, setTraitementParams] = useState({}); // valeurs courantes pour le formulaire
+  useEffect(() => {
+    localStorage.setItem("rightSidebarCollapsed", isRightSidebarCollapsed);
+  }, [isRightSidebarCollapsed]);
 
-    useEffect(() => { /* chargement du catalogue */
+  // ===============================
+  // Post-traitement catalogue
+  // ===============================
+  const [catalog, setCatalog] = useState({});
+  const [selectedTraitement, setSelectedTraitement] = useState("");
+  const [traitementParams, setTraitementParams] = useState({});
+
+  useEffect(() => {
     const fetchCatalog = async () => {
-        try {
-            const response = await fetch(`${API_URL}/traitements/catalog`);
-            const data = await response.json();
-            setCatalog(data);
+      try {
+        const response = await fetch(`${API_URL}/traitements/catalog`);
+        const data = await response.json();
+        setCatalog(data);
 
-            // Initialiser le premier traitement par défaut si besoin
-            const firstKey = Object.keys(data)[0];
-            setSelectedTraitement(firstKey);
-            setTraitementParams(data[firstKey].params || {});
-        } catch (err) {
-            console.error("Impossible de charger le catalogue :", err);
-        }
+        const firstKey = Object.keys(data)[0] || "";
+        setSelectedTraitement(firstKey);
+
+        const defaults = {};
+        Object.entries(data[firstKey]?.params || {}).forEach(([k, v]) => (defaults[k] = v.default));
+        const allowedTypes = data[firstKey]?.type || [];
+        defaults.dataType = allowedTypes[0] || null;
+
+        setTraitementParams(defaults);
+      } catch (err) {
+        console.error("Impossible de charger le catalogue :", err);
+      }
     };
-
     fetchCatalog();
-    }, []);
+  }, []);
 
-    useEffect(() => { /* Type de traitement entre IRM et MRSI*/
-        if (!selectedTraitement) return;
-        const allowedTypes = catalog[selectedTraitement]?.type || [];
-        setTraitementParams((prev) => ({
-            ...prev,
-            dataType: allowedTypes[0] || null,
-            // réinitialiser les autres paramètres aux valeurs par défaut (utile si on change entre les traitements)
-            ...Object.fromEntries(
-            Object.entries(catalog[selectedTraitement]?.params || {}).map(
-                ([k, v]) => [k, v.default]
-            )
-            ),
-        }));
-    }, [selectedTraitement, catalog]);
+  useEffect(() => {
+    if (!selectedTraitement) return;
+    const allowedTypes = catalog[selectedTraitement]?.type || [];
+    const defaults = {};
+    Object.entries(catalog[selectedTraitement]?.params || {}).forEach(([k, v]) => (defaults[k] = v.default));
+    defaults.dataType = allowedTypes[0] || null;
+    setTraitementParams((prev) => ({ ...prev, ...defaults }));
+  }, [selectedTraitement, catalog]);
 
+  // ===============================
+  // Status / Theme
+  // ===============================
+  useEffect(() => {
+    if (user) {
+      checkStatus();
+      const interval = setInterval(checkStatus, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [user]);
 
-    /* FIN POST TRAITEMENT CHOIX */ 
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("theme", theme);
+  }, [theme]);
 
+  const checkStatus = async () => {
+    try {
+      const res = await fetch(`${API_URL}/`);
+      setBackendStatus(!!res.ok);
+    } catch {
+      setBackendStatus(false);
+    }
+  };
 
+  // ===============================
+  // Upload (IRM / MRSI)
+  // ===============================
+  const handleUpload = async (e, type, cardId = null) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const file = formData.get("fichier");
 
-    // ===============================
-    // Optimization: Efficient Slicing from Flat Uint8Array
-    // ===============================
+    if (!file || file.size === 0) {
+      setError("Veuillez sélectionner un fichier.");
+      return;
+    }
 
-    // Helpers
+    setLoading(true);
+    setError("");
 
-    useEffect(() => {
-        if (user) {
-            checkStatus();
-            const interval = setInterval(checkStatus, 10000);
-            return () => clearInterval(interval);
-        }
-    }, [user]);
+    try {
+      const endpoint = type === "IRM" ? "/upload-irm/" : "/upload-mrsi/";
 
-    useEffect(() => {
-        document.documentElement.setAttribute("data-theme", theme);
-        localStorage.setItem("theme", theme);
-    }, [theme]);
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
 
-    const checkStatus = async () => {
-        try {
-            const res = await fetch(`${API_URL}/`);
-            if (res.ok) setBackendStatus(true);
-            else setBackendStatus(false);
-        } catch {
-            setBackendStatus(false);
-        }
-    };
+      if (!response.ok) throw new Error(`Erreur ${response.status}`);
 
-    const handleUpload = async (e, type, cardId = null) => {
-        e.preventDefault();
-        const formData = new FormData(e.target);
-        const file = formData.get("fichier");
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
 
-        if (!file || file.size === 0) {
-            setError("Veuillez sélectionner un fichier.");
-            return;
-        }
+      const data = await workerService.postMessage({
+        url: blobUrl,
+        options: {},
+        type: "process",
+      });
 
-        setLoading(true);
-        setError("");
+      URL.revokeObjectURL(blobUrl);
 
-        try {
-            const endpoint = type === "IRM" ? "/upload-irm/" : "/upload-mrsi/";
+      // Worker returns { type: "IRM" | "MRSI", ... }
+      if (data?.type === "IRM") {
+        const tagged = { ...data, __versionId: "base" , __backendKey: data.nom_fichier,};
 
-            const response = await fetch(`${API_URL}${endpoint}`, {
-                method: "POST",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-                body: formData,
-            });
+        setIrmResults(tagged);
+        setReference3DData(tagged);
 
-            if (!response.ok) throw new Error(`Erreur ${response.status}`);
-            
-            // Get as Blob/Text to avoid parsing JSON on main thread
-            const blob = await response.blob();
-            
-            // Now send to worker for parsing/processing
-            // I need to update the worker to accept "raw data" processing requests too, 
-            // OR I just use a data url? No that's for small things.
-            
-            // I should have made the worker more flexible.
-            // Let's RE-WRITE the worker to be more flexible first? 
-            // No, I can just use the `url` param in worker to be a Blob URL? 
-            // `fetch(blobUrl)` works! 
-            
-            // Brilliant. I will create a Blob URL for the response blob.
-            const blobUrl = URL.createObjectURL(blob);
-            
-            const data = await workerService.postMessage({
-                url: blobUrl,
-                options: {}, 
-                type: "process" // effectively just fetch and process
-            });
-            
-            URL.revokeObjectURL(blobUrl);
+        setIrmCards((prev) =>
+          prev.map((c) => {
+            // target card: either provided or first empty IRM
+            const targetId = cardId || prev.find((x) => !x.irmData)?.id || null;
+            if (c.id !== targetId) return c;
 
-            // ... rest of logic
-            
-            if (data.type === "IRM") {
-                 setIrmResults(data); // cleaning up this legacy state later?
-                 setReference3DData(data);
-                 if (cardId) {
-                     setIrmCards(prev => prev.map(c => c.id === cardId ? { ...c, irmData: data } : c));
-                 } else {
-                     setIrmCards(prev => {
-                         const firstEmpty = prev.find(c => !c.irmData);
-                         if (firstEmpty) {
-                             return prev.map(c => c.id === firstEmpty.id ? { ...c, irmData: data } : c);
-                         } else {
-                             return [...prev, { id: Date.now(), irmData: data, mrsiData: null }];
-                         }
-                     });
-                 }
-                 setView("irm");
-            } else if (data.type === "MRSI") {
-                // setMrsiResults(data); // Legacy state removed
-                if (cardId) {
-                    setIrmCards(prev => prev.map(c => c.id === cardId ? { ...c, mrsiData: data } : c));
-                } else {
-                     setIrmCards(prev => {
-                         const firstEmpty = prev.find(c => !c.mrsiData);
-                         if (firstEmpty) {
-                             return prev.map(c => c.id === firstEmpty.id ? { ...c, mrsiData: data } : c);
-                         } else {
-                             return [...prev, { id: Date.now(), irmData: null, mrsiData: data }];
-                         }
-                     });
-                }
-                setView("irm"); // MRSI stays in IRM view now
-            }
-
-        } catch (err) {
-            setError(`Erreur lors de l'envoi : ${err.message}`);
-        } finally {
-            setLoading(false);
-        }
-    };
-    const openExamFromPatients = async ({ irmFiles, mrsiFile, meta }) => {
-        setLoading(true);
-        setError("");
-
-        try {
-            // 1) Choisir une IRM par défaut
-            const irmFile = irmFiles && irmFiles.length ? irmFiles[0] : null;
-            let irmData = null;
-
-            if (irmFile) {
-                const formData = new FormData();
-                formData.append("fichier", irmFile);
-                
-                const response = await fetch(`${API_URL}/upload-irm/`, {
-                    method: "POST",
-                    headers: { Authorization: `Bearer ${token}` },
-                    body: formData
-                });
-                
-                if (!response.ok) throw new Error("Erreur upload IRM");
-                
-                const blob = await response.blob();
-                const blobUrl = URL.createObjectURL(blob);
-                
-                irmData = await workerService.postMessage({
-                    url: blobUrl,
-                    options: {},
-                    type: "process"
-                });
-                URL.revokeObjectURL(blobUrl);
-
-                setIrmResults(irmData);
-                setReference3DData(irmData);
-                setIrmCards([{ id: Date.now(), irmData: irmData, mrsiData: null }]);
-            }
-
-            if (mrsiFile) {
-                const formData = new FormData();
-                formData.append("fichier", mrsiFile);
-                
-                const response = await fetch(`${API_URL}/upload-mrsi/`, {
-                    method: "POST",
-                    headers: { Authorization: `Bearer ${token}` },
-                    body: formData
-                });
-
-                if (!response.ok) throw new Error("Erreur upload MRSI");
-
-                const blob = await response.blob();
-                const blobUrl = URL.createObjectURL(blob);
-                
-                const mrsiData = await workerService.postMessage({
-                    url: blobUrl,
-                    options: {},
-                    type: "process"
-                });
-                URL.revokeObjectURL(blobUrl);
-
-                // If we also loaded IRM, update that card, otherwise new card
-                if (irmFile && irmData) {
-                     setIrmCards(prev => {
-                         // assume it's the last one we just added
-                         const last = prev[prev.length - 1];
-                         return prev.map(c => c.id === last.id ? { ...c, mrsiData: mrsiData } : c);
-                     });
-                } else {
-                     setIrmCards([{ id: Date.now(), irmData: null, mrsiData: mrsiData }]);
-                }
-            }
-
-            // 2) Always go to IRM view
-            if (irmFile || mrsiFile) setView("irm");
-            else setView("patients");
-        } catch (e) {
-            setError(`Ouverture examen impossible : ${e.message}`);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-
-
-
-
-    const fetchSpectrum = async (name, x, y, z) => {
-        if (x == null || y == null || z == null) return null;
-        setLoading(true);
-        try {
-            const res = await fetch(`${API_URL}/spectrum/${name}/${x}/${y}/${z}`, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            });
-            if (!res.ok) throw new Error("Erreur affichage spectre");
-            const data = await res.json();
-            return data;
-        } catch (err) {
-            console.error(err);
-            setError("Impossible de charger le spectre.");
-            return null;
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const runTraitement = async (dataInstance, typeTraitement = selectedTraitement, params = {}) => {
-        // dataInstance peut être irmResults ou mrsiResults
-        if (!dataInstance?.nom_fichier && !dataInstance?.nom) return;
-        setLoading(true);
-        setError("");
-        try {
-            // Determine filename/instance key (IRM uses nom_fichier, MRSI uses nom)
-            const key = dataInstance.nom_fichier || dataInstance.nom;
-
-            // Filtrer les seuls params valides pour ce traitement
-            // = on enlève datatype qu'on a mis précédemment avec les params
-            const paramDefs = catalog[typeTraitement]?.params || {};
-            const validParams = {};
-            Object.keys(paramDefs).forEach((k) => {
-                if (params[k] !== undefined) validParams[k] = params[k];
-            });
-
-            
-            // Préparation de la payload
-            const bodyPayload = {
-                [key]: {
-                    type_traitement: typeTraitement,
-                    params: validParams,
-                },
+            const card = ensureHistoryInit(c);
+            return {
+              ...card,
+              irmData: tagged,
+              irmHistory: [{ id: "base", label: "Original", data: tagged, createdAt: Date.now() }],
             };
+          }),
+        );
 
-            console.time("Worker Request");
-            const data = await workerService.postMessage({
-                url: `${API_URL}/traitements`,
-                options: {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                    },
-                    body: JSON.stringify(bodyPayload)
-                }
-            });
-            console.timeEnd("Worker Request");
+        // if no empty card existed and cardId not provided => append new card
+        setIrmCards((prev) => {
+          const hasTarget = cardId ? prev.some((c) => c.id === cardId) : prev.some((c) => !c.irmData);
+          if (hasTarget) return prev;
 
-            const next = data?.[key];
-            if (!next) throw new Error("Réponse traitement inattendue.");
-            if (next?.error) throw new Error(next.error);
+          const newId = Date.now();
+          const newCard = {
+            id: newId,
+            irmData: tagged,
+            mrsiData: null,
+            irmHistory: [{ id: "base", label: "Original", data: tagged, createdAt: Date.now() }],
+            mrsiHistory: [],
+          };
+          return [...prev, newCard];
+        });
 
-            // Data processing (base64 -> Uint8Array) is already done by worker!
-
-            console.time("State Update");
-            if (next.type === "IRM") {
-                setIrmResults(next);
-                setIrmCards(prev => {
-                    console.time("SetIrmCards Callback");
-                    const newCards = prev.map((c, i) => i === 0 ? { ...c, irmData: next } : c);
-                    console.timeEnd("SetIrmCards Callback");
-                    return newCards;
-                });
-                setView("irm");
-            } else if (next.type === "MRSI") {
-                // setMrsiResults(next);
-                 setIrmCards(prev => {
-                    // Update first card for now, or find card matching this MRSI? 
-                    // Post-traitement context might need to know which card triggered it. 
-                    // For now, default to first card update if generic.
-                    return prev.map((c, i) => i === 0 ? { ...c, mrsiData: next } : c);
-                });
-                setView("irm");
-            }
-            else {
-                setIrmResults(next);
-            }
-            console.timeEnd("State Update");
-        } catch (err) {
-            setError(`Erreur Post-Traitement : ${err.message}`);
-        } finally {
-            setLoading(false);
+        // active card
+        if (cardId) setActiveCardId(cardId);
+        else {
+          const firstEmpty = irmCards.find((c) => !c.irmData);
+          setActiveCardId(firstEmpty?.id ?? null);
         }
-    };
 
-    const renderHome = () => (
-        <div className="card">
-            <h2>Bienvenue sur Plateforme Cancer</h2>
-            <p>
-                Cette application permet de visualiser et d'analyser des données
-                médicales IRM et MRSI.
-            </p>
-            <div className="info-grid" style={{ marginTop: "2rem" }}>
-                <div className="info-card">
-                    <h3>🧠 IRM</h3>
-                    <p>
-                        Visualisation de coupes sagittales, coronales et
-                        axiales.
-                    </p>
-                </div>
-                <div className="info-card">
-                    <h3>📊 MRSI</h3>
-                    <p>Analyse spectrographique et cartes de voxels.</p>
-                </div>
-            </div>
+        setView("irm");
+        return;
+      }
+
+      if (data?.type === "MRSI") {
+        const tagged = { ...data, __versionId: "base",__backendKey: data.nom, };
+
+        setMrsiResults(tagged);
+
+        setIrmCards((prev) =>
+          prev.map((c) => {
+            const targetId = cardId || prev.find((x) => !x.mrsiData)?.id || null;
+            if (c.id !== targetId) return c;
+
+            const card = ensureHistoryInit(c);
+            return {
+              ...card,
+              mrsiData: tagged,
+              mrsiHistory: [{ id: "base", label: "Original", data: tagged, createdAt: Date.now() }],
+            };
+          }),
+        );
+
+        setIrmCards((prev) => {
+          const hasTarget = cardId ? prev.some((c) => c.id === cardId) : prev.some((c) => !c.mrsiData);
+          if (hasTarget) return prev;
+
+          const newId = Date.now();
+          const newCard = {
+            id: newId,
+            irmData: null,
+            mrsiData: tagged,
+            irmHistory: [],
+            mrsiHistory: [{ id: "base", label: "Original", data: tagged, createdAt: Date.now() }],
+          };
+          return [...prev, newCard];
+        });
+
+        if (cardId) setActiveCardId(cardId);
+        else {
+          const firstEmpty = irmCards.find((c) => !c.mrsiData);
+          setActiveCardId(firstEmpty?.id ?? null);
+        }
+
+        setView("irm");
+        return;
+      }
+
+      throw new Error("Type de donnée inconnu (worker).");
+    } catch (err) {
+      setError(`Erreur lors de l'envoi : ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ===============================
+  // Patients -> Open Exam
+  // ===============================
+  const openExamFromPatients = async ({ irmFiles, mrsiFile }) => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const irmFile = irmFiles && irmFiles.length ? irmFiles[0] : null;
+
+      // Create a fresh card that becomes active
+      const baseCardId = Date.now();
+      setIrmCards([{ id: baseCardId, irmData: null, mrsiData: null, irmHistory: [], mrsiHistory: [] }]);
+      setActiveCardId(baseCardId);
+
+      if (irmFile) {
+        const formData = new FormData();
+        formData.append("fichier", irmFile);
+
+        const response = await fetch(`${API_URL}/upload-irm/`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+        if (!response.ok) throw new Error("Erreur upload IRM");
+
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+
+        const irmData = await workerService.postMessage({
+          url: blobUrl,
+          options: {},
+          type: "process",
+        });
+
+        URL.revokeObjectURL(blobUrl);
+
+        const tagged = { ...irmData, __versionId: "base" };
+        setIrmResults(tagged);
+        setReference3DData(tagged);
+
+        setIrmCards((prev) =>
+          prev.map((c) =>
+            c.id === baseCardId
+              ? {
+                  ...c,
+                  irmData: tagged,
+                  irmHistory: [{ id: "base", label: "Original", data: tagged, createdAt: Date.now() }],
+                }
+              : c,
+          ),
+        );
+      }
+
+      if (mrsiFile) {
+        const formData = new FormData();
+        formData.append("fichier", mrsiFile);
+
+        const response = await fetch(`${API_URL}/upload-mrsi/`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+        if (!response.ok) throw new Error("Erreur upload MRSI");
+
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+
+        const mrsiData = await workerService.postMessage({
+          url: blobUrl,
+          options: {},
+          type: "process",
+        });
+
+        URL.revokeObjectURL(blobUrl);
+
+        const tagged = { ...mrsiData, __versionId: "base" };
+        setMrsiResults(tagged);
+
+        setIrmCards((prev) =>
+          prev.map((c) =>
+            c.id === baseCardId
+              ? {
+                  ...c,
+                  mrsiData: tagged,
+                  mrsiHistory: [{ id: "base", label: "Original", data: tagged, createdAt: Date.now() }],
+                }
+              : c,
+          ),
+        );
+      }
+
+      setView(irmFile || mrsiFile ? "irm" : "patients");
+    } catch (e) {
+      setError(`Ouverture examen impossible : ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ===============================
+  // Spectrum (returns data; IrmCard stores it locally)
+  // ===============================
+  const fetchSpectrum = async (name, x, y, z) => {
+    if (x == null || y == null || z == null) return null;
+    try {
+      const res = await fetch(`${API_URL}/spectrum/${name}/${x}/${y}/${z}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Erreur affichage spectre");
+      return await res.json();
+    } catch (err) {
+      console.error(err);
+      setError("Impossible de charger le spectre.");
+      return null;
+    }
+  };
+
+  // ===============================
+  // ✅ Post-Traitement per card (parallel-safe + versions)
+  // ===============================
+  const runTraitement = async (dataInstance, cardId, typeTraitement = selectedTraitement, params = {}) => {
+    if (!dataInstance?.nom_fichier && !dataInstance?.nom) return;
+
+    setCardLoading(cardId, true);
+    setCardError(cardId, null);
+
+    try {
+      const key = dataInstance.__backendKey || dataInstance.nom_fichier || dataInstance.nom;
+
+      // Keep only params defined by selected traitement
+      const paramDefs = catalog[typeTraitement]?.params || {};
+      const validParams = {};
+      Object.keys(paramDefs).forEach((k) => {
+        if (params[k] !== undefined) validParams[k] = params[k];
+      });
+
+      // ✅ PATCH: backend expects "metabolites" (not "meta")
+      if ("meta" in validParams) {
+        validParams.metabolites = validParams.meta;
+        delete validParams.meta;
+      }
+
+      const bodyPayload = {
+        [key]: { type_traitement: typeTraitement, params: validParams },
+      };
+
+      const data = await workerService.postMessage({
+        url: `${API_URL}/traitements`,
+        options: {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(bodyPayload),
+        },
+      });
+
+      const next = data?.[key];
+      if (!next) throw new Error("Réponse traitement inattendue.");
+      if (next?.error) throw new Error(next.error);
+
+      const label = catalog[typeTraitement]?.label || typeTraitement;
+
+      if (next.type === "IRM") {
+        setIrmResults(next);
+        pushVersionToCard(cardId, "IRM", label, next);
+      } else if (next.type === "MRSI") {
+        setMrsiResults(next);
+        pushVersionToCard(cardId, "MRSI", label, next);
+      } else {
+        throw new Error("Type traitement inconnu.");
+      }
+
+      setView("irm");
+    } catch (err) {
+      setCardError(cardId, `Erreur Post-Traitement : ${err.message}`);
+    } finally {
+      setCardLoading(cardId, false);
+    }
+  };
+
+  // ✅ Run on ALL cards in parallel
+  const runTraitementOnAllCards = async () => {
+    const dt = traitementParams.dataType;
+
+    const tasks = irmCards.map(async (card) => {
+      const instance = dt === "IRM" ? card.irmData : dt === "MRSI" ? card.mrsiData : null;
+      if (!instance) return;
+      return runTraitement(instance, card.id, selectedTraitement, traitementParams);
+    });
+
+    await Promise.allSettled(tasks);
+  };
+
+  // ===============================
+  // UI Pieces
+  // ===============================
+  const renderHome = () => (
+    <div className="card">
+      <h2>Bienvenue sur Plateforme Cancer</h2>
+      <p>Cette application permet de visualiser et d'analyser des données médicales IRM et MRSI.</p>
+      <div className="info-grid" style={{ marginTop: "2rem" }}>
+        <div className="info-card">
+          <h3>🧠 IRM</h3>
+          <p>Visualisation de coupes sagittales, coronales et axiales.</p>
         </div>
-    );
-
-    const renderUploadForm = (type, cardId = null) => (
-        <div className="card">
-            <h2>Upload {type}</h2>
-            <form onSubmit={(e) => handleUpload(e, type, cardId)}>
-                <div className="form-group">
-                    <label>Fichier NIfTI (.nii, .nii.gz)</label>
-                    <input
-                        type="file"
-                        name="fichier"
-                        accept=".nii,.gz"
-                        required
-                    />
-                </div>
-                <button
-                    type="submit"
-                    className="btn-primary"
-                    disabled={loading || !backendStatus}
-                >
-                    {loading ? "Traitement..." : `Analyser ${type}`}
-                </button>
-                {!backendStatus && (
-                    <p
-                        className="status-error"
-                        style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}
-                    >
-                        Backend hors ligne
-                    </p>
-                )}
-            </form>
+        <div className="info-card">
+          <h3>📊 MRSI</h3>
+          <p>Analyse spectrographique et cartes de voxels.</p>
         </div>
-    );
+      </div>
+    </div>
+  );
 
+  const renderUploadForm = (type, cardId = null) => (
+    <div className="card">
+      <h2>Upload {type}</h2>
+      <form onSubmit={(e) => handleUpload(e, type, cardId)}>
+        <div className="form-group">
+          <label>Fichier NIfTI (.nii, .nii.gz)</label>
+          <input type="file" name="fichier" accept=".nii,.gz" required />
+        </div>
+        <button type="submit" className="btn-primary" disabled={loading || !backendStatus}>
+          {loading ? "Traitement..." : `Analyser ${type}`}
+        </button>
+        {!backendStatus && (
+          <p className="status-error" style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}>
+            Backend hors ligne
+          </p>
+        )}
+      </form>
+    </div>
+  );
 
-    const renderResults = (results) => {
-        return null; // Logic moved to IrmCard
-    };
+  if (authLoading) return <div className="loading-screen">Chargement...</div>;
+  if (!user) return <Login />;
 
-    if (authLoading) return <div className="loading-screen">Chargement...</div>;
-    if (!user) return <Login />;
+  const activeJob = activeCardId ? cardJobs[activeCardId] : null;
+  const canRunActive =
+    !!activeCard &&
+    ((traitementParams.dataType === "IRM" && !!activeCard?.irmData?.nom_fichier) ||
+      (traitementParams.dataType === "MRSI" && !!activeCard?.mrsiData?.nom)) &&
+    !(activeJob?.loading);
 
-    return (
-        <div className="App">
-            <div className={`sidebar ${isSidebarCollapsed ? "collapsed" : ""}`}>
-                <div className="sidebar-header">
-                    <span className="emoji">🏥</span>
-                    <h1>Cancer Platform</h1>
-                </div>
+  const canRunAll =
+    irmCards.some((c) => (traitementParams.dataType === "IRM" ? !!c.irmData?.nom_fichier : !!c.mrsiData?.nom)) &&
+    !loading;
 
-                <button 
-                    className="sidebar-toggle" 
-                    onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-                    title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
-                >
-                    {isSidebarCollapsed ? "→" : "←"}
-                </button>
+  return (
+    <div className="App">
+      {/* LEFT SIDEBAR */}
+      <div className={`sidebar ${isSidebarCollapsed ? "collapsed" : ""}`}>
+        <div className="sidebar-header">
+          <span className="emoji">🏥</span>
+          <h1>Cancer Platform</h1>
+        </div>
 
-                <nav className="nav-links">
-                    <div
-                        className={`nav-item ${view === "home" ? "active" : ""}`}
-                        onClick={() => setView("home")}
-                    >
-                        <span className="icon">🏠</span>
-                        <span className="label">Accueil</span>
-                    </div>
-                    <div
-                        className={`nav-item ${view === "irm" ? "active" : ""}`}
-                        onClick={() => setView("irm")}
-                    >
-                        <span className="icon">🧠</span>
-                        <span className="label">Upload IRM</span>
-                    </div>
+        <button
+          className="sidebar-toggle"
+          onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+        >
+          {isSidebarCollapsed ? "→" : "←"}
+        </button>
 
+        <nav className="nav-links">
+          <div className={`nav-item ${view === "home" ? "active" : ""}`} onClick={() => setView("home")}>
+            <span className="icon">🏠</span>
+            <span className="label">Accueil</span>
+          </div>
 
-                    <div
-                        className={`nav-item ${view === "patients" ? "active" : ""}`}
-                        onClick={() => setView("patients")}
-                    >
-                        <span className="icon">👤</span>
-                        <span className="label">Patients</span>
-                    </div>
-                </nav>
+          <div className={`nav-item ${view === "irm" ? "active" : ""}`} onClick={() => setView("irm")}>
+            <span className="icon">🧠</span>
+            <span className="label">Upload IRM</span>
+          </div>
 
-                <div className="sidebar-footer">
-                    <button className="btn-logout" onClick={logout}>
-                        {isSidebarCollapsed ? "🚪" : "Déconnexion"}
-                    </button>
-                </div>
+          <div className={`nav-item ${view === "patients" ? "active" : ""}`} onClick={() => setView("patients")}>
+            <span className="icon">👤</span>
+            <span className="label">Patients</span>
+          </div>
+        </nav>
+
+        <div className="sidebar-footer">
+          <button className="btn-logout" onClick={logout}>
+            {isSidebarCollapsed ? "🚪" : "Déconnexion"}
+          </button>
+        </div>
+      </div>
+
+      {/* MAIN */}
+      <div
+        className={`main-area ${isSidebarCollapsed ? "sidebar-collapsed" : ""} ${
+          isRightSidebarCollapsed ? "right-sidebar-collapsed" : ""
+        }`}
+      >
+        <div className="top-bar">
+          <div className="status-indicator">
+            <div className={`dot ${backendStatus ? "connected" : "disconnected"}`}></div>
+            <span>Backend {backendStatus ? "Connecté" : "Déconnecté"}</span>
+          </div>
+          <div className="user-info" style={{ display: "flex", gap: 12 }}>
+            <button className="theme-toggle" onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}>
+              {theme === "dark" ? "☀️ Light" : "🌙 Dark"}
+            </button>
+            <span style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>{user.username}</span>
+          </div>
+        </div>
+
+        {error && (
+          <div className="card" style={{ borderLeft: "4px solid var(--danger)", color: "var(--danger)" }}>
+            {error}
+          </div>
+        )}
+
+        {view === "home" && renderHome()}
+
+        {view === "irm" && (
+          <div className="irm-comparison-container" style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
+            {irmCards.map((card) => (
+              <IrmCard
+                key={card.id}
+                cardId={card.id}
+                irmData={card.irmData}
+                mrsiData={card.mrsiData}
+                irmHistory={card.irmHistory || []}
+                mrsiHistory={card.mrsiHistory || []}
+                onSelectIrmVersion={(versionId) => selectIrmVersion(card.id, versionId)}
+                onSelectMrsiVersion={(versionId) => selectMrsiVersion(card.id, versionId)}
+                isActive={card.id === activeCardId}
+                onSelect={() => setActiveCardId(card.id)}
+                job={cardJobs[card.id] || { loading: false, error: null }}
+                onDuplicate={() => {
+                  const newId = Date.now();
+                  setIrmCards((prev) => {
+                    const index = prev.findIndex((c) => c.id === card.id);
+                    const newCard = {
+                      id: newId,
+                      irmData: card.irmData ? { ...card.irmData } : null,
+                      mrsiData: card.mrsiData ? { ...card.mrsiData } : null,
+                      irmHistory: (card.irmHistory || []).map((v) => ({ ...v, data: { ...v.data } })),
+                      mrsiHistory: (card.mrsiHistory || []).map((v) => ({ ...v, data: { ...v.data } })),
+                    };
+                    const copy = [...prev];
+                    copy.splice(index + 1, 0, newCard);
+                    return copy;
+                  });
+                  setActiveCardId(newId);
+                }}
+                onDelete={(id) => {
+                  setIrmCards((prev) => {
+                    const next = prev.filter((c) => c.id !== id);
+                    if (next.length === 0) {
+                      const newId = Date.now();
+                      setActiveCardId(newId);
+                      return [{ id: newId, irmData: null, mrsiData: null, irmHistory: [], mrsiHistory: [] }];
+                    }
+                    if (id === activeCardId) setActiveCardId(next[0].id);
+                    return next;
+                  });
+
+                  // clean job state for deleted card
+                  setCardJobs((prev) => {
+                    const copy = { ...prev };
+                    delete copy[id];
+                    return copy;
+                  });
+                }}
+                renderUploadForm={renderUploadForm}
+                onFetchSpectrum={fetchSpectrum}
+              />
+            ))}
+
+            <button
+              className="btn-primary"
+              style={{ alignSelf: "center", padding: "1rem 2rem", fontSize: "1.1rem" }}
+              onClick={() => {
+                const newId = Date.now();
+                setIrmCards((prev) => [...prev, { id: newId, irmData: null, mrsiData: null, irmHistory: [], mrsiHistory: [] }]);
+                setActiveCardId(newId);
+              }}
+            >
+              + Ajouter une nouvelle carte de comparaison
+            </button>
+          </div>
+        )}
+
+        {view === "patients" && <PatientsExplorer onOpenExam={openExamFromPatients} />}
+      </div>
+
+      {/* RIGHT SIDEBAR */}
+      <div className={`sidebar right-sidebar ${isRightSidebarCollapsed ? "collapsed" : ""}`}>
+        <div className="sidebar-header">
+          <span className="emoji">⚙️</span>
+          <h1>Post-Traitement</h1>
+        </div>
+
+        <button
+          className="sidebar-toggle right"
+          onClick={() => setIsRightSidebarCollapsed(!isRightSidebarCollapsed)}
+          title={isRightSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+        >
+          {isRightSidebarCollapsed ? "←" : "→"}
+        </button>
+
+        <div className="nav-links">
+          {/* Traitement choice */}
+          <div className="nav-dropdown">
+            <div className="nav-item" onClick={() => setIsTraitementOpen(!isTraitementOpen)}>
+              <span className={`arrow ${isTraitementOpen ? "" : "close"}`}>▼</span>
+              <span className="label">{catalog[selectedTraitement]?.label || "Catalogue non trouvé"}</span>
             </div>
 
-            <div className={`main-area ${isSidebarCollapsed ? "sidebar-collapsed" : ""} ${isRightSidebarCollapsed ? "right-sidebar-collapsed" : ""}`}>
-                <div className="top-bar">
-                    <div className="status-indicator">
-                        <div
-                            className={`dot ${backendStatus ? "connected" : "disconnected"}`}
-                        ></div>
-                        <span>
-                            Backend {backendStatus ? "Connecté" : "Déconnecté"}
-                        </span>
-                    </div>
-                    <div
-                        className="user-info"
-                        style={{ display: "flex", gap: 12 }}
-                    >
-                        <button
-                            className="theme-toggle"
-                            onClick={() =>
-                                setTheme((t) =>
-                                    t === "dark" ? "light" : "dark",
-                                )
-                            }
-                        >
-                            {theme === "dark" ? "☀️ Light" : "🌙 Dark"}
-                        </button>
-                        <span
-                            style={{
-                                color: "var(--text-muted)",
-                                fontSize: "0.875rem",
-                            }}
-                        >
-                            {user.username}
-                        </span>
-                    </div>
-                </div>
+            {isTraitementOpen && (
+              <div className="dropdown-menu">
+                {Object.entries(catalog).map(([key, val]) => (
+                  <div
+                    key={key}
+                    className="dropdown-option"
+                    onClick={() => {
+                      setSelectedTraitement(key);
+                      const defaults = {};
+                      Object.entries(val.params || {}).forEach(([k, v]) => (defaults[k] = v.default));
+                      const allowedTypes = val.type || [];
+                      defaults.dataType = allowedTypes[0] || null;
+                      setTraitementParams(defaults);
+                      setIsTraitementOpen(false);
+                    }}
+                  >
+                    {val.label}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
-                {error && (
-                    <div
-                        className="card"
-                        style={{
-                            borderLeft: "4px solid var(--danger)",
-                            color: "var(--danger)",
-                        }}
-                    >
-                        {error}
-                    </div>
-                )}
+          {/* Run traitement (ACTIVE CARD) */}
+          <button
+            className="btn-primary"
+            onClick={() => {
+              if (!activeCard) return;
 
-                {view === "home" && renderHome()}
-                {view === "irm" && (
-                    <div className="irm-comparison-container" style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
-                        {irmCards.map((card) => (
-                            <IrmCard 
-                                key={card.id}
-                                cardId={card.id}
-                                irmData={card.irmData}
-                                mrsiData={card.mrsiData}
-                                onDuplicate={(data) => {
-                                    setIrmCards(prev => {
-                                        const index = prev.findIndex(c => c.id === card.id);
-                                        const newCard = { 
-                                            id: Date.now(), 
-                                            irmData: card.irmData ? { ...card.irmData } : null, 
-                                            mrsiData: card.mrsiData ? { ...card.mrsiData } : null 
-                                        };
-                                        const newCards = [...prev];
-                                        newCards.splice(index + 1, 0, newCard);
-                                        return newCards;
-                                    });
-                                }}
-                                onDelete={(id) => {
-                                    setIrmCards(prev => {
-                                        if (prev.length === 1) return [{ id: Date.now(), irmData: null, mrsiData: null }];
-                                        return prev.filter(c => c.id !== id);
-                                    });
-                                }}
-                                renderUploadForm={renderUploadForm}
-                                onFetchSpectrum={fetchSpectrum}
-                            />
-                        ))}
-                        <button 
-                            className="btn-primary" 
-                            style={{ alignSelf: "center", padding: "1rem 2rem", fontSize: "1.1rem" }}
-                            onClick={() => setIrmCards(prev => [...prev, { id: Date.now(), irmData: null, mrsiData: null }])}
-                        >
-                            + Ajouter une nouvelle carte de comparaison
-                        </button>
-                    </div>
-                )}
-                {view === "mrsi" && (
-                    <>
-                         {renderUploadForm("MRSI")}
-                         {/* Removed renderResults call */}
-                    </>
-                )}
-                
+              const instance =
+                traitementParams.dataType === "IRM"
+                  ? activeCard?.irmData
+                  : traitementParams.dataType === "MRSI"
+                  ? activeCard?.mrsiData
+                  : null;
 
+              if (!instance) return;
 
-                {view === "patients" && <PatientsExplorer onOpenExam={openExamFromPatients} />}
+              runTraitement(instance, activeCard.id, selectedTraitement, traitementParams);
+            }}
+            disabled={!canRunActive}
+          >
+            {activeJob?.loading ? "Traitement..." : "Lancer sur la carte active"}
+          </button>
 
+          {/* Run traitement (ALL CARDS) */}
+          <button className="btn-secondary" onClick={runTraitementOnAllCards} disabled={!canRunAll}>
+            Lancer sur toutes les cartes
+          </button>
 
+          {/* Params */}
+          <div className="nav-item" onClick={() => setIsParamOpen(!isParamOpen)}>
+            <span className="icon">⚙️</span>
+            <span className="label">Paramètres :</span>
+          </div>
 
-            </div>
-
-            <div className={`sidebar right-sidebar ${isRightSidebarCollapsed ? "collapsed" : ""}`}>
-                <div className="sidebar-header">
-                    <span className="emoji">⚙️</span>
-                    <h1>Post-Traitement</h1>
-                </div>
-
-                <button 
-                    className="sidebar-toggle right" 
-                    onClick={() => setIsRightSidebarCollapsed(!isRightSidebarCollapsed)}
-                    title={isRightSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
-                >
-                    {isRightSidebarCollapsed ? "←" : "→"}
-                </button>
-
-                <div className="nav-links">
-                    {/* RIGHT_SIDEBAR_CONTENT */}
-                    {/* Choix type traitement */}
-                    <div className="nav-dropdown">
-                        <div
-                            className="nav-item"
-                            onClick={() => setIsTraitementOpen(!isTraitementOpen)}
-                        >
-                            <span className={`arrow ${isTraitementOpen ? "" : "close"}`}>▼</span>
-                            <span className="label">{catalog[selectedTraitement]?.label || "Catalogue non trouvé"}</span>
-                            
-                        </div>
-
-                        {isTraitementOpen && (
-                            <div className="dropdown-menu">
-                                {Object.entries(catalog).map(([key, val]) => (
-                                    <div
-                                        key={key}
-                                        className="dropdown-option"
-                                        onClick={() => {
-                                            setSelectedTraitement(key);
-                                            const defaults = {};
-                                            Object.entries(val.params || {}).forEach(([k,v]) => defaults[k] = v.default);
-                                            setTraitementParams(defaults);
-                                            setIsTraitementOpen(false);
-                                        }}
-                                    >
-                                        {val.label}
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Bouton lancement traitement */}
-                    <button
-                        className="btn-primary"
+          {isParamOpen && (
+            <div className="traitement-form">
+              {/* DataType */}
+              <div className="param-container">
+                <label className="param-label">Type de données :</label>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  {["IRM", "MRSI"].map((dt) => {
+                    const isPossible = catalog[selectedTraitement]?.type?.includes(dt);
+                    const isSelected = traitementParams.dataType === dt;
+                    return (
+                      <div
+                        key={dt}
+                        className={`nav-item param-choice ${isSelected ? "selected" : ""} ${!isPossible ? "disabled" : ""}`}
                         onClick={() => {
-                            // Déterminer l'instance selon le type choisi
-                            const instance =
-                                traitementParams.dataType === "IRM" ? irmResults :
-                                traitementParams.dataType === "MRSI" ? mrsiResults :
-                                null;
-
-                            if (!instance) return;
-
-                            runTraitement(instance, selectedTraitement, traitementParams);
+                          if (!isPossible) return;
+                          setTraitementParams({ ...traitementParams, dataType: dt });
                         }}
-                        disabled={loading || !(
-                            (traitementParams.dataType === "IRM" && irmResults?.nom_fichier) ||
-                            (traitementParams.dataType === "MRSI" && mrsiResults?.nom)
-                        )}
-                    >
-                        {loading ? "Traitement..." : "Lancer Traitement"}
-                    </button>
-
-
-                    {/* Formulaire parametres */}
-                    <div
-                        className="nav-item"
-                        onClick={() => setIsParamOpen(!isParamOpen)}
-                    >
-                        <span className="icon">⚙️</span>
-                        <span className="label">Paramètres :</span>
-                    </div>
-                    {isParamOpen && (
-                        <div className="traitement-form">
-                            {/* Bloc Type de données */}
-                            <div className="param-container">
-                                <label className="param-label">Type de données :</label>
-                                <div style={{ display: "flex", gap: "0.5rem" }}>
-                                {["IRM", "MRSI"].map((dt) => {
-                                    const isPossible = catalog[selectedTraitement]?.type.includes(dt);
-                                    const isSelected = traitementParams.dataType === dt;
-                                    return (
-                                    <div
-                                        key={dt}
-                                        className={`nav-item param-choice ${isSelected ? "selected" : ""} ${!isPossible ? "disabled" : ""}`}
-                                        onClick={() => {
-                                        if (!isPossible) return;
-                                        setTraitementParams({ ...traitementParams, dataType: dt });
-                                        }}
-                                    >
-                                        <span className="label">{dt}</span>
-                                    </div>
-                                    );
-                                })}
-                                </div>
-                            </div>
-                            {/* Bloc paramètres spécifiques traitement */}
-                            {Object.entries(catalog[selectedTraitement]?.params || {}).map(
-                                ([paramKey, paramDef]) => {
-                                return (
-                                    <div key={paramKey} className="param-container">
-                                    <label className="param-label">{paramDef.label} :</label>
-
-                                    {paramDef.type === "int" && (
-                                        <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
-                                            <input
-                                            className="param-input"
-                                            type="number"
-                                            min={paramDef.range[0]}
-                                            max={paramDef.range[1]}
-                                            value={paramDef.default}
-                                            onChange={(e) =>
-                                                setTraitementParams({
-                                                ...traitementParams,
-                                                [paramKey]: parseInt(e.target.value),
-                                                })
-                                            }
-                                            />
-                                            <small className="param-range">
-                                                Valeurs possibles : {paramDef.range[0]} – {paramDef.range[1]}
-                                            </small>
-                                        </div>
-                                    )}
-
-                                    {paramDef.type_param === "choix" && (
-                                        <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
-                                        <select
-                                        className="param-input"
-                                        value={traitementParams[paramKey] || paramDef.default}
-                                        onChange={(e) =>
-                                            setTraitementParams({
-                                            ...traitementParams,
-                                            [paramKey]: e.target.value,
-                                            })
-                                        }
-                                        >
-                                        {paramDef.select.map((opt) => (
-                                            <option key={opt} value={opt}>
-                                            {opt}
-                                            </option>
-                                        ))}
-                                        </select>
-                                        </div>
-                                    )}
-
-                                    {paramDef.type_param === "choix_multiple" && (
-                                        <div className="checkbox-group">
-                                        {paramDef.select.map((opt) => {
-                                            const current = traitementParams[paramKey] || [];
-                                            return (
-                                            <label key={opt} className="checkbox-label">
-                                                <input
-                                                type="checkbox"
-                                                checked={current.includes(opt)}
-                                                onChange={(e) => {
-                                                    let updated;
-                                                    if (e.target.checked) updated = [...current, opt];
-                                                    else updated = current.filter((x) => x !== opt);
-                                                    setTraitementParams({
-                                                    ...traitementParams,
-                                                    [paramKey]: updated,
-                                                    });
-                                                }}
-                                                />
-                                                {opt}
-                                            </label>
-                                            );
-                                        })}
-                                        </div>
-                                    )}
-
-                                    <hr className="param-divider" />
-                                    </div>
-                                );
-                                }
-                            )}
-                        </div>                    
-                    )}                    
+                      >
+                        <span className="label">{dt}</span>
+                      </div>
+                    );
+                  })}
                 </div>
+              </div>
+
+              {/* Specific params */}
+              {Object.entries(catalog[selectedTraitement]?.params || {}).map(([paramKey, paramDef]) => (
+                <div key={paramKey} className="param-container">
+                  <label className="param-label">{paramDef.label} :</label>
+
+                  {paramDef.type === "int" && (
+                    <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
+                      <input
+                        className="param-input"
+                        type="number"
+                        min={paramDef.range[0]}
+                        max={paramDef.range[1]}
+                        value={traitementParams[paramKey] ?? paramDef.default}
+                        onChange={(e) =>
+                          setTraitementParams({
+                            ...traitementParams,
+                            [paramKey]: parseInt(e.target.value, 10),
+                          })
+                        }
+                      />
+                      <small className="param-range">
+                        Valeurs possibles : {paramDef.range[0]} – {paramDef.range[1]}
+                      </small>
+                    </div>
+                  )}
+
+                  {paramDef.type_param === "choix" && (
+                    <select
+                      className="param-input"
+                      value={traitementParams[paramKey] ?? paramDef.default}
+                      onChange={(e) =>
+                        setTraitementParams({
+                          ...traitementParams,
+                          [paramKey]: e.target.value,
+                        })
+                      }
+                    >
+                      {paramDef.select.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  {paramDef.type_param === "choix_multiple" && (
+                    <div className="checkbox-group">
+                      {paramDef.select.map((opt) => {
+                        const current = traitementParams[paramKey] || [];
+                        return (
+                          <label key={opt} className="checkbox-label">
+                            <input
+                              type="checkbox"
+                              checked={current.includes(opt)}
+                              onChange={(e) => {
+                                const updated = e.target.checked ? [...current, opt] : current.filter((x) => x !== opt);
+                                setTraitementParams({
+                                  ...traitementParams,
+                                  [paramKey]: updated,
+                                });
+                              }}
+                            />
+                            {opt}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <hr className="param-divider" />
+                </div>
+              ))}
             </div>
+          )}
         </div>
-    );
+      </div>
+    </div>
+  );
 }
 
 export default App;
