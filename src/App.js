@@ -121,6 +121,12 @@ function App() {
     }));
   };
 
+  useEffect(() => {
+    if (user) {
+      setView("home");
+    }
+  }, [user]);
+
   const setCardError = (cardId, msg) => {
     setCardJobs((prev) => ({
       ...prev,
