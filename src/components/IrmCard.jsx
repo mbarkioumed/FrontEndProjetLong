@@ -118,8 +118,8 @@ const IrmCard = ({
   onDeleteVersion,
   renderUploadForm,
   onFetchSpectrum,
-  job, // per-card job state { loading, error }
-  // ✅ NEW (versions)
+  job, 
+  maskData,
   irmHistory = [],
   mrsiHistory = [],
   onSelectIrmVersion,
@@ -154,7 +154,11 @@ const IrmCard = ({
         const centerY = Math.floor(irmData.shape[1] / 2);
         const centerZ = Math.floor(irmData.shape[2] / 2);
 
-        setSliceIndices({ sagittal: centerX, coronal: centerY, axial: centerZ });
+        setSliceIndices({
+          sagittal: centerX,
+          coronal: centerY,
+          axial: centerZ,
+        });
         setCursor3D({ x: centerX, y: centerY, z: centerZ });
       } else {
         setSliceIndices({ sagittal: 0, coronal: 0, axial: 0 });
@@ -196,7 +200,12 @@ const IrmCard = ({
       slice.push(vol.subarray(offset, offset + Z));
     }
     return orient2D(slice, orientIRM.sagittal);
-  }, [irmData?.dataRef, irmData?.shape, sliceIndices.sagittal, orientIRM.sagittal]);
+  }, [
+    irmData?.dataRef,
+    irmData?.shape,
+    sliceIndices.sagittal,
+    orientIRM.sagittal,
+  ]);
 
   const corOriented = useMemo(() => {
     const vol = getData(irmData?.dataRef);
@@ -211,7 +220,12 @@ const IrmCard = ({
       slice.push(row);
     }
     return orient2D(slice, orientIRM.coronal);
-  }, [irmData?.dataRef, irmData?.shape, sliceIndices.coronal, orientIRM.coronal]);
+  }, [
+    irmData?.dataRef,
+    irmData?.shape,
+    sliceIndices.coronal,
+    orientIRM.coronal,
+  ]);
 
   const axOriented = useMemo(() => {
     const vol = getData(irmData?.dataRef);
@@ -227,6 +241,63 @@ const IrmCard = ({
     }
     return orient2D(slice, orientIRM.axial);
   }, [irmData?.dataRef, irmData?.shape, sliceIndices.axial, orientIRM.axial]);
+  const maskSagOriented = useMemo(() => {
+    const vol = getData(maskData?.dataRef);
+    if (!vol || !maskData?.shape) return null;
+    const [X, Y, Z] = maskData.shape;
+    const sx = sliceIndices.sagittal;
+    
+    if (sx < 0 || sx >= X) return null;
+
+    const slice = [];
+    for (let y = 0; y < Y; y++) {
+      const offset = sx * Y * Z + y * Z;
+      slice.push(vol.subarray(offset, offset + Z));
+    }
+    return orient2D(slice, orientIRM.sagittal);
+  }, [
+    maskData?.dataRef,
+    maskData?.shape,
+    sliceIndices.sagittal,
+    orientIRM.sagittal,
+  ]);
+
+  const maskCorOriented = useMemo(() => {
+    const vol = getData(maskData?.dataRef);
+    if (!vol || !maskData?.shape) return null;
+    const [X, Y, Z] = maskData.shape;
+    const sy = sliceIndices.coronal;
+    if (sy < 0 || sy >= Y) return null;
+
+    const slice = [];
+    for (let x = 0; x < X; x++) {
+      const row = new Uint8Array(Z);
+      for (let z = 0; z < Z; z++) row[z] = vol[x * Y * Z + sy * Z + z];
+      slice.push(row);
+    }
+    return orient2D(slice, orientIRM.coronal);
+  }, [
+    maskData?.dataRef,
+    maskData?.shape,
+    sliceIndices.coronal,
+    orientIRM.coronal,
+  ]);
+
+  const maskAxOriented = useMemo(() => {
+    const vol = getData(maskData?.dataRef);
+    if (!vol || !maskData?.shape) return null;
+    const [X, Y, Z] = maskData.shape;
+    const sz = sliceIndices.axial;
+    if (sz < 0 || sz >= Z) return null;
+
+    const slice = [];
+    for (let x = 0; x < X; x++) {
+      const row = new Uint8Array(Y);
+      for (let y = 0; y < Y; y++) row[y] = vol[x * Y * Z + y * Z + sz];
+      slice.push(row);
+    }
+    return orient2D(slice, orientIRM.axial);
+  }, [maskData?.dataRef, maskData?.shape, sliceIndices.axial, orientIRM.axial]);
 
   const sliceDims = useMemo(() => {
     if (!irmData?.shape) return null;
@@ -303,11 +374,10 @@ const IrmCard = ({
   };
 
   const currentIrmVersion = irmData?.__versionId || "base";
- 
 
   const activeIrmVersion = useMemo(() => {
     if (!irmHistory?.length) return null;
-    return irmHistory.find(v => v.id === currentIrmVersion) || null;
+    return irmHistory.find((v) => v.id === currentIrmVersion) || null;
   }, [irmHistory, currentIrmVersion]);
 
   const irmParamsText = useMemo(() => {
@@ -318,10 +388,10 @@ const IrmCard = ({
       .join(" | ");
   }, [activeIrmVersion]);
 
-   const currentMrsiVersion = mrsiData?.__versionId || "base";
-   const activeMrsiVersion = useMemo(() => {
+  const currentMrsiVersion = mrsiData?.__versionId || "base";
+  const activeMrsiVersion = useMemo(() => {
     if (!mrsiHistory?.length) return null;
-    return mrsiHistory.find(v => v.id === currentMrsiVersion) || null;
+    return mrsiHistory.find((v) => v.id === currentMrsiVersion) || null;
   }, [mrsiHistory, currentMrsiVersion]);
 
   const mrsiParamsText = useMemo(() => {
@@ -367,14 +437,32 @@ const IrmCard = ({
         </div>
 
         {/* per-card job status */}
-        {job?.error && <div style={{ color: "var(--danger)", marginBottom: "0.5rem" }}>{job.error}</div>}
-        {job?.loading && <div style={{ color: "var(--text-muted)", marginBottom: "0.5rem" }}>Traitement en cours...</div>}
+        {job?.error && (
+          <div style={{ color: "var(--danger)", marginBottom: "0.5rem" }}>
+            {job.error}
+          </div>
+        )}
+        {job?.loading && (
+          <div style={{ color: "var(--text-muted)", marginBottom: "0.5rem" }}>
+            Traitement en cours...
+          </div>
+        )}
 
         <h3>Nouvelle Carte</h3>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-          <div onClick={(e) => e.stopPropagation()}>{renderUploadForm("IRM", cardId)}</div>
-          <div onClick={(e) => e.stopPropagation()}>{renderUploadForm("MRSI", cardId)}</div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: "1rem",
+          }}
+        >
+          <div onClick={(e) => e.stopPropagation()}>
+            {renderUploadForm("IRM", cardId)}
+          </div>
+          <div onClick={(e) => e.stopPropagation()}>
+            {renderUploadForm("MRSI", cardId)}
+          </div>
         </div>
       </div>
     );
@@ -394,8 +482,6 @@ const IrmCard = ({
     axDispW,
     axDispH,
   } = sliceDims || {};
-
-
 
   return (
     <div
@@ -418,7 +504,14 @@ const IrmCard = ({
           marginBottom: "0.75rem",
         }}
       >
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 260 }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            minWidth: 260,
+          }}
+        >
           <h2 style={{ margin: 0 }}>
             {irmData ? `IRM: ${irmData.nom_fichier}` : ""}
             {irmData && mrsiData ? " | " : ""}
@@ -426,29 +519,42 @@ const IrmCard = ({
           </h2>
 
           {/* ✅ Versions selectors (IRM / MRSI) */}
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
+          <div
+            style={{ display: "flex", gap: 10, flexWrap: "wrap" }}
+            onClick={(e) => e.stopPropagation()}
+          >
             {irmData && (
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>IRM version:</span>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  IRM version:
+                </span>
                 <select
                   className="form-select"
-                  style={{ padding: "0.4rem 0.6rem", borderRadius: 10, fontSize: 12, width: 220 }}
+                  style={{
+                    padding: "0.4rem 0.6rem",
+                    borderRadius: 10,
+                    fontSize: 12,
+                    width: 220,
+                  }}
                   value={currentIrmVersion}
                   onChange={(e) => onSelectIrmVersion?.(e.target.value)}
                 >
-                  {(irmHistory?.length ? irmHistory : [{ id: "base", label: "Original" }]).map((v) => (
+                  {(irmHistory?.length
+                    ? irmHistory
+                    : [{ id: "base", label: "Original" }]
+                  ).map((v) => (
                     <option key={v.id} value={v.id}>
                       {v.label || v.id}
                     </option>
                   ))}
                 </select>
-                
+
                 {/* Croix pour supprimer la version */}
                 {currentIrmVersion !== "base" && (
                   <span
                     onClick={(e) => {
                       e.stopPropagation(); // empêche de sélectionner la carte
-                      onDeleteVersion?.( "IRM", currentIrmVersion); // appeler la fonction de suppression
+                      onDeleteVersion?.("IRM", currentIrmVersion); // appeler la fonction de suppression
                     }}
                     style={{
                       cursor: "pointer",
@@ -481,17 +587,30 @@ const IrmCard = ({
               </div>
             )}
           </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
+          <div
+            style={{ display: "flex", gap: 10, flexWrap: "wrap" }}
+            onClick={(e) => e.stopPropagation()}
+          >
             {mrsiData && (
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>MRSI version:</span>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  MRSI version:
+                </span>
                 <select
                   className="form-select"
-                  style={{ padding: "0.4rem 0.6rem", borderRadius: 10, fontSize: 12, width: 220 }}
+                  style={{
+                    padding: "0.4rem 0.6rem",
+                    borderRadius: 10,
+                    fontSize: 12,
+                    width: 220,
+                  }}
                   value={currentMrsiVersion}
                   onChange={(e) => onSelectMrsiVersion?.(e.target.value)}
                 >
-                  {(mrsiHistory?.length ? mrsiHistory : [{ id: "base", label: "Original" }]).map((v) => (
+                  {(mrsiHistory?.length
+                    ? mrsiHistory
+                    : [{ id: "base", label: "Original" }]
+                  ).map((v) => (
                     <option key={v.id} value={v.id}>
                       {v.label || v.id}
                     </option>
@@ -502,7 +621,7 @@ const IrmCard = ({
                   <span
                     onClick={(e) => {
                       e.stopPropagation(); // empêche de sélectionner la carte
-                      onDeleteVersion?.( "MRSI", currentMrsiVersion); // appeler la fonction de suppression
+                      onDeleteVersion?.("MRSI", currentMrsiVersion); // appeler la fonction de suppression
                     }}
                     style={{
                       cursor: "pointer",
@@ -560,8 +679,16 @@ const IrmCard = ({
       </div>
 
       {/* per-card job status */}
-      {job?.error && <div style={{ color: "var(--danger)", marginBottom: "0.5rem" }}>{job.error}</div>}
-      {job?.loading && <div style={{ color: "var(--text-muted)", marginBottom: "0.5rem" }}>Traitement en cours...</div>}
+      {job?.error && (
+        <div style={{ color: "var(--danger)", marginBottom: "0.5rem" }}>
+          {job.error}
+        </div>
+      )}
+      {job?.loading && (
+        <div style={{ color: "var(--text-muted)", marginBottom: "0.5rem" }}>
+          Traitement en cours...
+        </div>
+      )}
 
       <div className="viz-grid">
         {/* --- IRM --- */}
@@ -571,13 +698,31 @@ const IrmCard = ({
             <div className="slice-control">
               <SliceCanvas
                 data={sagOriented}
+                overlay={maskSagOriented}
+                opacity={0.45}
                 title={`Sagittal (X=${sliceIndices.sagittal})`}
                 onClick={(xDisp, yDisp) => {
-                  const p = inversePoint(xDisp, yDisp, sagDispW, sagDispH, orientIRM.sagittal);
-                  setSliceIndices((prev) => ({ ...prev, coronal: p.y, axial: p.x }));
+                  const p = inversePoint(
+                    xDisp,
+                    yDisp,
+                    sagDispW,
+                    sagDispH,
+                    orientIRM.sagittal,
+                  );
+                  setSliceIndices((prev) => ({
+                    ...prev,
+                    coronal: p.y,
+                    axial: p.x,
+                  }));
                   setCursor3D((prev) => ({ ...prev, y: p.y, z: p.x }));
                 }}
-                crosshair={crosshairXY("sagittal", sagW, sagH, cursor3D?.z, cursor3D?.y)}
+                crosshair={crosshairXY(
+                  "sagittal",
+                  sagW,
+                  sagH,
+                  cursor3D?.z,
+                  cursor3D?.y,
+                )}
               />
               <input
                 type="range"
@@ -597,13 +742,31 @@ const IrmCard = ({
             <div className="slice-control">
               <SliceCanvas
                 data={corOriented}
+                overlay={maskCorOriented}
+                opacity={0.45}
                 title={`Coronal (Y=${sliceIndices.coronal})`}
                 onClick={(xDisp, yDisp) => {
-                  const p = inversePoint(xDisp, yDisp, corDispW, corDispH, orientIRM.coronal);
-                  setSliceIndices((prev) => ({ ...prev, sagittal: p.y, axial: p.x }));
+                  const p = inversePoint(
+                    xDisp,
+                    yDisp,
+                    corDispW,
+                    corDispH,
+                    orientIRM.coronal,
+                  );
+                  setSliceIndices((prev) => ({
+                    ...prev,
+                    sagittal: p.y,
+                    axial: p.x,
+                  }));
                   setCursor3D((prev) => ({ ...prev, x: p.y, z: p.x }));
                 }}
-                crosshair={crosshairXY("coronal", corW, corH, cursor3D?.z, cursor3D?.x)}
+                crosshair={crosshairXY(
+                  "coronal",
+                  corW,
+                  corH,
+                  cursor3D?.z,
+                  cursor3D?.x,
+                )}
               />
               <input
                 type="range"
@@ -623,13 +786,31 @@ const IrmCard = ({
             <div className="slice-control">
               <SliceCanvas
                 data={axOriented}
+                overlay={maskAxOriented}
+                opacity={0.45}
                 title={`Axial (Z=${sliceIndices.axial})`}
                 onClick={(xDisp, yDisp) => {
-                  const p = inversePoint(xDisp, yDisp, axDispW, axDispH, orientIRM.axial);
-                  setSliceIndices((prev) => ({ ...prev, sagittal: p.y, coronal: p.x }));
+                  const p = inversePoint(
+                    xDisp,
+                    yDisp,
+                    axDispW,
+                    axDispH,
+                    orientIRM.axial,
+                  );
+                  setSliceIndices((prev) => ({
+                    ...prev,
+                    sagittal: p.y,
+                    coronal: p.x,
+                  }));
                   setCursor3D((prev) => ({ ...prev, x: p.y, y: p.x }));
                 }}
-                crosshair={crosshairXY("axial", axW, axH, cursor3D?.y, cursor3D?.x)}
+                crosshair={crosshairXY(
+                  "axial",
+                  axW,
+                  axH,
+                  cursor3D?.y,
+                  cursor3D?.x,
+                )}
               />
               <input
                 type="range"
@@ -646,7 +827,15 @@ const IrmCard = ({
             </div>
 
             {/* 3D Brain */}
-            <div className="slice-control" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: "350px" }}>
+            <div
+              className="slice-control"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                height: "100%",
+                minHeight: "350px",
+              }}
+            >
               <div
                 style={{
                   flex: 1,
@@ -658,8 +847,7 @@ const IrmCard = ({
                 }}
               >
                 {/*3D Brain trop lent voir peut-on l'alléger ?*/}
-                {/*<Brain3D irmData={brain3DData} cursor3D={cursor3D} />*/}
-
+                <Brain3D irmData={irmData} cursor3D={cursor3D} />
               </div>
               <span className="slice-label" style={{ marginTop: "0.5rem" }}>
                 3D Brain Preview
@@ -684,7 +872,9 @@ const IrmCard = ({
                 min="0"
                 max={mrsiData.shape[2] - 1}
                 value={mrsiSliceIndex}
-                onChange={(e) => setMrsiSliceIndex(parseInt(e.target.value, 10))}
+                onChange={(e) =>
+                  setMrsiSliceIndex(parseInt(e.target.value, 10))
+                }
                 className="volume-slider"
               />
             </div>
@@ -704,7 +894,9 @@ const IrmCard = ({
                     border: "1px dashed #ccc",
                   }}
                 >
-                  <p>Sélectionnez un voxel sur la carte MRSI pour voir le spectre</p>
+                  <p>
+                    Sélectionnez un voxel sur la carte MRSI pour voir le spectre
+                  </p>
                 </div>
               )}
             </div>
@@ -713,12 +905,18 @@ const IrmCard = ({
 
         {/* --- Upload if missing --- */}
         {!irmData && (
-          <div className="slice-control card" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="slice-control card"
+            onClick={(e) => e.stopPropagation()}
+          >
             {renderUploadForm("IRM", cardId)}
           </div>
         )}
         {!mrsiData && (
-          <div className="slice-control card" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="slice-control card"
+            onClick={(e) => e.stopPropagation()}
+          >
             {renderUploadForm("MRSI", cardId)}
           </div>
         )}

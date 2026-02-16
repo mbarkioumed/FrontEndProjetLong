@@ -8,7 +8,9 @@ import IrmCard from "./components/IrmCard";
 
 import { storeData } from "./utils/dataCache";
 
-const worker = new Worker(new URL("./dataProcessor.worker.js", import.meta.url));
+const worker = new Worker(
+  new URL("./dataProcessor.worker.js", import.meta.url),
+);
 
 const workerService = {
   requestId: 0,
@@ -73,7 +75,6 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // ✅ Per-card job state for parallel post-processing
   // { [cardId]: { loading: boolean, error: string|null } }
   const [cardJobs, setCardJobs] = useState({});
 
@@ -85,11 +86,15 @@ function App() {
   const [isTraitementOpen, setIsTraitementOpen] = useState(false);
   const [isParamOpen, setIsParamOpen] = useState(true);
 
-  // ===============================
-  // ✅ Comparison cards + active card
-  // ===============================
   const [irmCards, setIrmCards] = useState([
-    { id: Date.now(), irmData: null, mrsiData: null, irmHistory: [], mrsiHistory: [] },
+    {
+      id: Date.now(),
+      irmData: null,
+      mrsiData: null,
+      maskData: null,
+      irmHistory: [],
+      mrsiHistory: [],
+    },
   ]);
 
   const [activeCardId, setActiveCardId] = useState(null);
@@ -122,50 +127,89 @@ function App() {
       [cardId]: { ...(prev[cardId] || {}), error: msg },
     }));
   };
+  const [examModalOpen, setExamModalOpen] = useState(false);
+  const [examModalCardIds, setExamModalCardIds] = useState([]);
 
   // ===============================
-  // ✅ History helpers (versions)
   // ===============================
   const ensureHistoryInit = (card) => ({
     ...card,
     irmHistory:
       card.irmHistory ||
       (card.irmData
-        ? [{ id: "base", label: "Original", data: { ...card.irmData, __versionId: "base" }, createdAt: Date.now() }]
+        ? [
+            {
+              id: "base",
+              label: "Original",
+              data: { ...card.irmData, __versionId: "base" },
+              createdAt: Date.now(),
+            },
+          ]
         : []),
     mrsiHistory:
       card.mrsiHistory ||
       (card.mrsiData
-        ? [{ id: "base", label: "Original", data: { ...card.mrsiData, __versionId: "base" }, createdAt: Date.now() }]
+        ? [
+            {
+              id: "base",
+              label: "Original",
+              data: { ...card.mrsiData, __versionId: "base" },
+              createdAt: Date.now(),
+            },
+          ]
         : []),
   });
-const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) => {
-  const versionId = `t_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const pushVersionToCard = (
+    cardId,
+    type,
+    versionLabel,
+    nextData,
+    params = {},
+  ) => {
+    const versionId = `t_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
-  setIrmCards((prev) =>
-    prev.map((c) => {
-      if (c.id !== cardId) return c;
+    setIrmCards((prev) =>
+      prev.map((c) => {
+        if (c.id !== cardId) return c;
 
-      const current = type === "IRM" ? c.irmData : c.mrsiData;
-      const backendKey = current?.__backendKey;
+        const current = type === "IRM" ? c.irmData : c.mrsiData;
+        const backendKey = current?.__backendKey;
 
-      const tagged = {
-        ...nextData,
-        __versionId: versionId,
-        __backendKey: backendKey, // ✅ super important
-        _version_params : params,
-      };
+        const tagged = {
+          ...nextData,
+          __versionId: versionId,
+          __backendKey: backendKey,
+          _version_params: params,
+        };
 
-      if (type === "IRM") {
-        const irmHistory = [...(c.irmHistory || []), { id: versionId, params : params, label: versionLabel, data: tagged, createdAt: Date.now() }];
-        return { ...c, irmHistory, irmData: tagged };
-      }
+        if (type === "IRM") {
+          const irmHistory = [
+            ...(c.irmHistory || []),
+            {
+              id: versionId,
+              params,
+              label: versionLabel,
+              data: tagged,
+              createdAt: Date.now(),
+            },
+          ];
+          return { ...c, irmHistory, irmData: tagged };
+        }
 
-      const mrsiHistory = [...(c.mrsiHistory || []), { id: versionId, params : params, label: versionLabel, data: tagged, createdAt: Date.now() }];
-      return { ...c, mrsiHistory, mrsiData: tagged };
-    })
-  );
-};
+        const mrsiHistory = [
+          ...(c.mrsiHistory || []),
+          {
+            id: versionId,
+            params,
+            label: versionLabel,
+            data: tagged,
+            createdAt: Date.now(),
+          },
+        ];
+        return { ...c, mrsiHistory, mrsiData: tagged };
+      }),
+    );
+  };
 
   const selectIrmVersion = (cardId, versionId) => {
     setIrmCards((prev) =>
@@ -196,7 +240,9 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
   // ===============================
   // Theme / Layout
   // ===============================
-  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "light");
+  const [theme, setTheme] = useState(
+    () => localStorage.getItem("theme") || "light",
+  );
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
     () => localStorage.getItem("sidebarCollapsed") === "true",
   );
@@ -230,7 +276,9 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
         setSelectedTraitement(firstKey);
 
         const defaults = {};
-        Object.entries(data[firstKey]?.params || {}).forEach(([k, v]) => (defaults[k] = v.default));
+        Object.entries(data[firstKey]?.params || {}).forEach(
+          ([k, v]) => (defaults[k] = v.default),
+        );
         const allowedTypes = data[firstKey]?.type || [];
         defaults.dataType = allowedTypes[0] || null;
 
@@ -246,7 +294,9 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
     if (!selectedTraitement) return;
     const allowedTypes = catalog[selectedTraitement]?.type || [];
     const defaults = {};
-    Object.entries(catalog[selectedTraitement]?.params || {}).forEach(([k, v]) => (defaults[k] = v.default));
+    Object.entries(catalog[selectedTraitement]?.params || {}).forEach(
+      ([k, v]) => (defaults[k] = v.default),
+    );
     defaults.dataType = allowedTypes[0] || null;
     setTraitementParams((prev) => ({ ...prev, ...defaults }));
   }, [selectedTraitement, catalog]);
@@ -316,7 +366,11 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
 
       // Worker returns { type: "IRM" | "MRSI", ... }
       if (data?.type === "IRM") {
-        const tagged = { ...data, __versionId: "base" , __backendKey: data.nom_fichier,};
+        const tagged = {
+          ...data,
+          __versionId: "base",
+          __backendKey: data.nom_fichier,
+        };
 
         setIrmResults(tagged);
         setReference3DData(tagged);
@@ -331,14 +385,23 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
             return {
               ...card,
               irmData: tagged,
-              irmHistory: [{ id: "base", label: "Original", data: tagged, createdAt: Date.now() }],
+              irmHistory: [
+                {
+                  id: "base",
+                  label: "Original",
+                  data: tagged,
+                  createdAt: Date.now(),
+                },
+              ],
             };
           }),
         );
 
         // if no empty card existed and cardId not provided => append new card
         setIrmCards((prev) => {
-          const hasTarget = cardId ? prev.some((c) => c.id === cardId) : prev.some((c) => !c.irmData);
+          const hasTarget = cardId
+            ? prev.some((c) => c.id === cardId)
+            : prev.some((c) => !c.irmData);
           if (hasTarget) return prev;
 
           const newId = Date.now();
@@ -346,7 +409,14 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
             id: newId,
             irmData: tagged,
             mrsiData: null,
-            irmHistory: [{ id: "base", label: "Original", data: tagged, createdAt: Date.now() }],
+            irmHistory: [
+              {
+                id: "base",
+                label: "Original",
+                data: tagged,
+                createdAt: Date.now(),
+              },
+            ],
             mrsiHistory: [],
           };
           return [...prev, newCard];
@@ -364,26 +434,36 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
       }
 
       if (data?.type === "MRSI") {
-        const tagged = { ...data, __versionId: "base",__backendKey: data.nom, };
+        const tagged = { ...data, __versionId: "base", __backendKey: data.nom };
 
         setMrsiResults(tagged);
 
         setIrmCards((prev) =>
           prev.map((c) => {
-            const targetId = cardId || prev.find((x) => !x.mrsiData)?.id || null;
+            const targetId =
+              cardId || prev.find((x) => !x.mrsiData)?.id || null;
             if (c.id !== targetId) return c;
 
             const card = ensureHistoryInit(c);
             return {
               ...card,
               mrsiData: tagged,
-              mrsiHistory: [{ id: "base", label: "Original", data: tagged, createdAt: Date.now() }],
+              mrsiHistory: [
+                {
+                  id: "base",
+                  label: "Original",
+                  data: tagged,
+                  createdAt: Date.now(),
+                },
+              ],
             };
           }),
         );
 
         setIrmCards((prev) => {
-          const hasTarget = cardId ? prev.some((c) => c.id === cardId) : prev.some((c) => !c.mrsiData);
+          const hasTarget = cardId
+            ? prev.some((c) => c.id === cardId)
+            : prev.some((c) => !c.mrsiData);
           if (hasTarget) return prev;
 
           const newId = Date.now();
@@ -392,7 +472,14 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
             irmData: null,
             mrsiData: tagged,
             irmHistory: [],
-            mrsiHistory: [{ id: "base", label: "Original", data: tagged, createdAt: Date.now() }],
+            mrsiHistory: [
+              {
+                id: "base",
+                label: "Original",
+                data: tagged,
+                createdAt: Date.now(),
+              },
+            ],
           };
           return [...prev, newCard];
         });
@@ -418,7 +505,7 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
   // ===============================
   // Patients -> Open Exam
   // ===============================
-  const openExamFromPatients = async ({ irmFiles, mrsiFile }) => {
+  const openExamFromPatients = async ({ irmFiles, mrsiFile, maskFile }) => {
     setLoading(true);
     setError("");
 
@@ -427,9 +514,25 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
 
       // Create a fresh card that becomes active
       const baseCardId = Date.now();
-      setIrmCards([{ id: baseCardId, irmData: null, mrsiData: null, irmHistory: [], mrsiHistory: [] }]);
-      setActiveCardId(baseCardId);
 
+      setIrmCards((prev) => [
+        ...prev,
+        {
+          id: baseCardId,
+          irmData: null,
+          mrsiData: null,
+          maskData: null,
+          irmHistory: [],
+          mrsiHistory: [],
+        },
+      ]);
+      setActiveCardId(baseCardId);
+      setExamModalCardIds([baseCardId]);
+      setExamModalOpen(true);
+
+      // -----------------
+      // IRM
+      // -----------------
       if (irmFile) {
         const formData = new FormData();
         formData.append("fichier", irmFile);
@@ -452,7 +555,12 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
 
         URL.revokeObjectURL(blobUrl);
 
-        const tagged = { ...irmData, __versionId: "base" };
+        const tagged = {
+          ...irmData,
+          __versionId: "base",
+          __backendKey: irmData?.nom_fichier, // pour post-traitements
+        };
+
         setIrmResults(tagged);
         setReference3DData(tagged);
 
@@ -462,13 +570,23 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
               ? {
                   ...c,
                   irmData: tagged,
-                  irmHistory: [{ id: "base", label: "Original", data: tagged, createdAt: Date.now() }],
+                  irmHistory: [
+                    {
+                      id: "base",
+                      label: "Original",
+                      data: tagged,
+                      createdAt: Date.now(),
+                    },
+                  ],
                 }
               : c,
           ),
         );
       }
 
+      // -----------------
+      // MRSI
+      // -----------------
       if (mrsiFile) {
         const formData = new FormData();
         formData.append("fichier", mrsiFile);
@@ -491,7 +609,12 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
 
         URL.revokeObjectURL(blobUrl);
 
-        const tagged = { ...mrsiData, __versionId: "base" };
+        const tagged = {
+          ...mrsiData,
+          __versionId: "base",
+          __backendKey: mrsiData?.nom, //  pour post-traitements
+        };
+
         setMrsiResults(tagged);
 
         setIrmCards((prev) =>
@@ -500,14 +623,68 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
               ? {
                   ...c,
                   mrsiData: tagged,
-                  mrsiHistory: [{ id: "base", label: "Original", data: tagged, createdAt: Date.now() }],
+                  mrsiHistory: [
+                    {
+                      id: "base",
+                      label: "Original",
+                      data: tagged,
+                      createdAt: Date.now(),
+                    },
+                  ],
                 }
               : c,
           ),
         );
       }
 
-      setView(irmFile || mrsiFile ? "irm" : "patients");
+      // -----------------
+      // MASK (temp: via upload-irm)
+      // -----------------
+      if (maskFile) {
+        const formData = new FormData();
+        formData.append("fichier", maskFile);
+
+        // ⚠️ TEMPORAIRE : on passe par upload-irm pour récupérer un volume exploitable côté front.
+        // Idéal : endpoint /upload-mask/ côté backend pour préserver les labels.
+        const response = await fetch(`${API_URL}/upload-irm/`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+        if (!response.ok) throw new Error("Erreur upload MASK");
+
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+
+        const maskData = await workerService.postMessage({
+          url: blobUrl,
+          options: {},
+          type: "process",
+        });
+
+        URL.revokeObjectURL(blobUrl);
+
+        const taggedMask = {
+          ...maskData,
+          __versionId: "base",
+          __isMask: true,
+          __backendKey: maskData?.nom_fichier,
+        };
+
+        setIrmCards((prev) =>
+          prev.map((c) =>
+            c.id === baseCardId
+              ? {
+                  ...c,
+                  maskData: taggedMask,
+                }
+              : c,
+          ),
+        );
+      }
+
+      setView("patients"); // on reste sur Patients
+      setExamModalOpen(true);
     } catch (e) {
       setError(`Ouverture examen impossible : ${e.message}`);
     } finally {
@@ -536,14 +713,22 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
   // ===============================
   // ✅ Post-Traitement per card (parallel-safe + versions)
   // ===============================
-  const runTraitement = async (dataInstance, cardId, typeTraitement = selectedTraitement, params = {}) => {
+  const runTraitement = async (
+    dataInstance,
+    cardId,
+    typeTraitement = selectedTraitement,
+    params = {},
+  ) => {
     if (!dataInstance?.nom_fichier && !dataInstance?.nom) return;
 
     setCardLoading(cardId, true);
     setCardError(cardId, null);
 
     try {
-      const key = dataInstance.__backendKey || dataInstance.nom_fichier || dataInstance.nom;
+      const key =
+        dataInstance.__backendKey ||
+        dataInstance.nom_fichier ||
+        dataInstance.nom;
 
       // Keep only params defined by selected traitement
       const paramDefs = catalog[typeTraitement]?.params || {};
@@ -568,8 +753,8 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
       const response = await fetch(`${API_URL}/traitements`, {
         method: "POST",
         headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(bodyPayload),
       });
@@ -623,9 +808,15 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
     const dt = traitementParams.dataType;
 
     const tasks = irmCards.map(async (card) => {
-      const instance = dt === "IRM" ? card.irmData : dt === "MRSI" ? card.mrsiData : null;
+      const instance =
+        dt === "IRM" ? card.irmData : dt === "MRSI" ? card.mrsiData : null;
       if (!instance) return;
-      return runTraitement(instance, card.id, selectedTraitement, traitementParams);
+      return runTraitement(
+        instance,
+        card.id,
+        selectedTraitement,
+        traitementParams,
+      );
     });
 
     await Promise.allSettled(tasks);
@@ -637,7 +828,10 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
   const renderHome = () => (
     <div className="card">
       <h2>Bienvenue sur Plateforme Cancer</h2>
-      <p>Cette application permet de visualiser et d'analyser des données médicales IRM et MRSI.</p>
+      <p>
+        Cette application permet de visualiser et d'analyser des données
+        médicales IRM et MRSI.
+      </p>
       <div className="info-grid" style={{ marginTop: "2rem" }}>
         <div className="info-card">
           <h3>🧠 IRM</h3>
@@ -659,11 +853,18 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
           <label>Fichier NIfTI (.nii, .nii.gz)</label>
           <input type="file" name="fichier" accept=".nii,.gz" required />
         </div>
-        <button type="submit" className="btn-primary" disabled={loading || !backendStatus}>
+        <button
+          type="submit"
+          className="btn-primary"
+          disabled={loading || !backendStatus}
+        >
           {loading ? "Traitement..." : `Analyser ${type}`}
         </button>
         {!backendStatus && (
-          <p className="status-error" style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}>
+          <p
+            className="status-error"
+            style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}
+          >
             Backend hors ligne
           </p>
         )}
@@ -677,13 +878,17 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
   const activeJob = activeCardId ? cardJobs[activeCardId] : null;
   const canRunActive =
     !!activeCard &&
-    ((traitementParams.dataType === "IRM" && !!activeCard?.irmData?.nom_fichier) ||
+    ((traitementParams.dataType === "IRM" &&
+      !!activeCard?.irmData?.nom_fichier) ||
       (traitementParams.dataType === "MRSI" && !!activeCard?.mrsiData?.nom)) &&
-    !(activeJob?.loading);
+    !activeJob?.loading;
 
   const canRunAll =
-    irmCards.some((c) => (traitementParams.dataType === "IRM" ? !!c.irmData?.nom_fichier : !!c.mrsiData?.nom)) &&
-    !loading;
+    irmCards.some((c) =>
+      traitementParams.dataType === "IRM"
+        ? !!c.irmData?.nom_fichier
+        : !!c.mrsiData?.nom,
+    ) && !loading;
 
   return (
     <div className="App">
@@ -703,17 +908,26 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
         </button>
 
         <nav className="nav-links">
-          <div className={`nav-item ${view === "home" ? "active" : ""}`} onClick={() => setView("home")}>
+          <div
+            className={`nav-item ${view === "home" ? "active" : ""}`}
+            onClick={() => setView("home")}
+          >
             <span className="icon">🏠</span>
             <span className="label">Accueil</span>
           </div>
 
-          <div className={`nav-item ${view === "irm" ? "active" : ""}`} onClick={() => setView("irm")}>
+          <div
+            className={`nav-item ${view === "irm" ? "active" : ""}`}
+            onClick={() => setView("irm")}
+          >
             <span className="icon">🧠</span>
             <span className="label">Upload IRM</span>
           </div>
 
-          <div className={`nav-item ${view === "patients" ? "active" : ""}`} onClick={() => setView("patients")}>
+          <div
+            className={`nav-item ${view === "patients" ? "active" : ""}`}
+            onClick={() => setView("patients")}
+          >
             <span className="icon">👤</span>
             <span className="label">Patients</span>
           </div>
@@ -734,19 +948,32 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
       >
         <div className="top-bar">
           <div className="status-indicator">
-            <div className={`dot ${backendStatus ? "connected" : "disconnected"}`}></div>
+            <div
+              className={`dot ${backendStatus ? "connected" : "disconnected"}`}
+            ></div>
             <span>Backend {backendStatus ? "Connecté" : "Déconnecté"}</span>
           </div>
           <div className="user-info" style={{ display: "flex", gap: 12 }}>
-            <button className="theme-toggle" onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}>
+            <button
+              className="theme-toggle"
+              onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+            >
               {theme === "dark" ? "☀️ Light" : "🌙 Dark"}
             </button>
-            <span style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>{user.username}</span>
+            <span style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
+              {user.username}
+            </span>
           </div>
         </div>
 
         {error && (
-          <div className="card" style={{ borderLeft: "4px solid var(--danger)", color: "var(--danger)" }}>
+          <div
+            className="card"
+            style={{
+              borderLeft: "4px solid var(--danger)",
+              color: "var(--danger)",
+            }}
+          >
             {error}
           </div>
         )}
@@ -754,7 +981,10 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
         {view === "home" && renderHome()}
 
         {view === "irm" && (
-          <div className="irm-comparison-container" style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
+          <div
+            className="irm-comparison-container"
+            style={{ display: "flex", flexDirection: "column", gap: "2rem" }}
+          >
             {irmCards.map((card) => (
               <IrmCard
                 key={card.id}
@@ -763,37 +993,54 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
                 mrsiData={card.mrsiData}
                 irmHistory={card.irmHistory || []}
                 mrsiHistory={card.mrsiHistory || []}
-                onSelectIrmVersion={(versionId) => selectIrmVersion(card.id, versionId)}
-                onSelectMrsiVersion={(versionId) => selectMrsiVersion(card.id, versionId)}
+                maskData={card.maskData}
+                onSelectIrmVersion={(versionId) =>
+                  selectIrmVersion(card.id, versionId)
+                }
+                onSelectMrsiVersion={(versionId) =>
+                  selectMrsiVersion(card.id, versionId)
+                }
                 onDeleteVersion={(type, versionId) => {
                   setIrmCards((prev) =>
                     prev.map((c) => {
                       if (c.id !== card.id) return c;
 
                       if (type === "IRM") {
-                        const nextHistory = (c.irmHistory || []).filter((v) => v.id !== versionId);
+                        const nextHistory = (c.irmHistory || []).filter(
+                          (v) => v.id !== versionId,
+                        );
                         const nextData =
                           c.irmData?.__versionId === versionId
                             ? nextHistory.length
                               ? nextHistory[nextHistory.length - 1].data
                               : null
                             : c.irmData;
-                        return { ...c, irmHistory: nextHistory, irmData: nextData };
+                        return {
+                          ...c,
+                          irmHistory: nextHistory,
+                          irmData: nextData,
+                        };
                       }
 
                       if (type === "MRSI") {
-                        const nextHistory = (c.mrsiHistory || []).filter((v) => v.id !== versionId);
+                        const nextHistory = (c.mrsiHistory || []).filter(
+                          (v) => v.id !== versionId,
+                        );
                         const nextData =
                           c.mrsiData?.__versionId === versionId
                             ? nextHistory.length
                               ? nextHistory[nextHistory.length - 1].data
                               : null
                             : c.mrsiData;
-                        return { ...c, mrsiHistory: nextHistory, mrsiData: nextData };
+                        return {
+                          ...c,
+                          mrsiHistory: nextHistory,
+                          mrsiData: nextData,
+                        };
                       }
 
                       return c;
-                    })
+                    }),
                   );
                 }}
                 isActive={card.id === activeCardId}
@@ -807,8 +1054,15 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
                       id: newId,
                       irmData: card.irmData ? { ...card.irmData } : null,
                       mrsiData: card.mrsiData ? { ...card.mrsiData } : null,
-                      irmHistory: (card.irmHistory || []).map((v) => ({ ...v, data: { ...v.data } })),
-                      mrsiHistory: (card.mrsiHistory || []).map((v) => ({ ...v, data: { ...v.data } })),
+                      maskData: card.maskData ? { ...card.maskData } : null,
+                      irmHistory: (card.irmHistory || []).map((v) => ({
+                        ...v,
+                        data: { ...v.data },
+                      })),
+                      mrsiHistory: (card.mrsiHistory || []).map((v) => ({
+                        ...v,
+                        data: { ...v.data },
+                      })),
                     };
                     const copy = [...prev];
                     copy.splice(index + 1, 0, newCard);
@@ -822,7 +1076,16 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
                     if (next.length === 0) {
                       const newId = Date.now();
                       setActiveCardId(newId);
-                      return [{ id: newId, irmData: null, mrsiData: null, irmHistory: [], mrsiHistory: [] }];
+                      return [
+                        {
+                          id: newId,
+                          irmData: null,
+                          mrsiData: null,
+                          maskData: null,
+                          irmHistory: [],
+                          mrsiHistory: [],
+                        },
+                      ];
                     }
                     if (id === activeCardId) setActiveCardId(next[0].id);
                     return next;
@@ -842,10 +1105,24 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
 
             <button
               className="btn-primary"
-              style={{ alignSelf: "center", padding: "1rem 2rem", fontSize: "1.1rem" }}
+              style={{
+                alignSelf: "center",
+                padding: "1rem 2rem",
+                fontSize: "1.1rem",
+              }}
               onClick={() => {
                 const newId = Date.now();
-                setIrmCards((prev) => [...prev, { id: newId, irmData: null, mrsiData: null, irmHistory: [], mrsiHistory: [] }]);
+                setIrmCards((prev) => [
+                  ...prev,
+                  {
+                    id: newId,
+                    irmData: null,
+                    mrsiData: null,
+                    maskData: null,
+                    irmHistory: [],
+                    mrsiHistory: [],
+                  },
+                ]);
                 setActiveCardId(newId);
               }}
             >
@@ -854,11 +1131,72 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
           </div>
         )}
 
-        {view === "patients" && <PatientsExplorer onOpenExam={openExamFromPatients} />}
+        {view === "patients" && (
+          <PatientsExplorer onOpenExam={openExamFromPatients} />
+        )}
+        {examModalOpen && (
+          <div
+            className="modal-overlay"
+            onClick={() => setExamModalOpen(false)}
+          >
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              {/* Header du modal */}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 10,
+                }}
+              >
+                <strong>Vue Examen</strong>
+                <button
+                  className="btn-secondary"
+                  onClick={() => setExamModalOpen(false)}
+                  style={{ color: "var(--danger)" }}
+                  aria-label="Fermer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Contenu : tes IrmCards */}
+              {irmCards
+                .filter((c) => examModalCardIds.includes(c.id))
+                .map((card) => (
+                  <IrmCard
+                    key={card.id}
+                    cardId={card.id}
+                    irmData={card.irmData}
+                    mrsiData={card.mrsiData}
+                    maskData={card.maskData}
+                    irmHistory={card.irmHistory || []}
+                    mrsiHistory={card.mrsiHistory || []}
+                    onSelectIrmVersion={(versionId) =>
+                      selectIrmVersion(card.id, versionId)
+                    }
+                    onSelectMrsiVersion={(versionId) =>
+                      selectMrsiVersion(card.id, versionId)
+                    }
+                    onFetchSpectrum={fetchSpectrum}
+                    renderUploadForm={renderUploadForm}
+                    job={cardJobs[card.id] || { loading: false, error: null }}
+                    isActive={card.id === activeCardId}
+                    onSelect={() => setActiveCardId(card.id)}
+                    onDuplicate={() => {}}
+                    onDelete={() => {}}
+                    onDeleteVersion={() => {}}
+                  />
+                ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* RIGHT SIDEBAR */}
-      <div className={`sidebar right-sidebar ${isRightSidebarCollapsed ? "collapsed" : ""}`}>
+      <div
+        className={`sidebar right-sidebar ${isRightSidebarCollapsed ? "collapsed" : ""}`}
+      >
         <div className="sidebar-header">
           <span className="emoji">⚙️</span>
           <h1>Post-Traitement</h1>
@@ -867,7 +1205,9 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
         <button
           className="sidebar-toggle right"
           onClick={() => setIsRightSidebarCollapsed(!isRightSidebarCollapsed)}
-          title={isRightSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+          title={
+            isRightSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"
+          }
         >
           {isRightSidebarCollapsed ? "←" : "→"}
         </button>
@@ -875,9 +1215,16 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
         <div className="nav-links">
           {/* Traitement choice */}
           <div className="nav-dropdown">
-            <div className="nav-item" onClick={() => setIsTraitementOpen(!isTraitementOpen)}>
-              <span className={`arrow ${isTraitementOpen ? "" : "close"}`}>▼</span>
-              <span className="label">{catalog[selectedTraitement]?.label || "Catalogue non trouvé"}</span>
+            <div
+              className="nav-item"
+              onClick={() => setIsTraitementOpen(!isTraitementOpen)}
+            >
+              <span className={`arrow ${isTraitementOpen ? "" : "close"}`}>
+                ▼
+              </span>
+              <span className="label">
+                {catalog[selectedTraitement]?.label || "Catalogue non trouvé"}
+              </span>
             </div>
 
             {isTraitementOpen && (
@@ -889,7 +1236,9 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
                     onClick={() => {
                       setSelectedTraitement(key);
                       const defaults = {};
-                      Object.entries(val.params || {}).forEach(([k, v]) => (defaults[k] = v.default));
+                      Object.entries(val.params || {}).forEach(
+                        ([k, v]) => (defaults[k] = v.default),
+                      );
                       const allowedTypes = val.type || [];
                       defaults.dataType = allowedTypes[0] || null;
                       setTraitementParams(defaults);
@@ -913,25 +1262,39 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
                 traitementParams.dataType === "IRM"
                   ? activeCard?.irmData
                   : traitementParams.dataType === "MRSI"
-                  ? activeCard?.mrsiData
-                  : null;
+                    ? activeCard?.mrsiData
+                    : null;
 
               if (!instance) return;
 
-              runTraitement(instance, activeCard.id, selectedTraitement, traitementParams);
+              runTraitement(
+                instance,
+                activeCard.id,
+                selectedTraitement,
+                traitementParams,
+              );
             }}
             disabled={!canRunActive}
           >
-            {activeJob?.loading ? "Traitement..." : "Lancer sur la carte active"}
+            {activeJob?.loading
+              ? "Traitement..."
+              : "Lancer sur la carte active"}
           </button>
 
           {/* Run traitement (ALL CARDS) */}
-          <button className="btn-secondary" onClick={runTraitementOnAllCards} disabled={!canRunAll}>
+          <button
+            className="btn-secondary"
+            onClick={runTraitementOnAllCards}
+            disabled={!canRunAll}
+          >
             Lancer sur toutes les cartes
           </button>
 
           {/* Params */}
-          <div className="nav-item" onClick={() => setIsParamOpen(!isParamOpen)}>
+          <div
+            className="nav-item"
+            onClick={() => setIsParamOpen(!isParamOpen)}
+          >
             <span className="icon">⚙️</span>
             <span className="label">Paramètres :</span>
           </div>
@@ -943,7 +1306,8 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
                 <label className="param-label">Type de données :</label>
                 <div style={{ display: "flex", gap: "0.5rem" }}>
                   {["IRM", "MRSI"].map((dt) => {
-                    const isPossible = catalog[selectedTraitement]?.type?.includes(dt);
+                    const isPossible =
+                      catalog[selectedTraitement]?.type?.includes(dt);
                     const isSelected = traitementParams.dataType === dt;
                     return (
                       <div
@@ -951,7 +1315,10 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
                         className={`nav-item param-choice ${isSelected ? "selected" : ""} ${!isPossible ? "disabled" : ""}`}
                         onClick={() => {
                           if (!isPossible) return;
-                          setTraitementParams({ ...traitementParams, dataType: dt });
+                          setTraitementParams({
+                            ...traitementParams,
+                            dataType: dt,
+                          });
                         }}
                       >
                         <span className="label">{dt}</span>
@@ -962,77 +1329,88 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) =>
               </div>
 
               {/* Specific params */}
-              {Object.entries(catalog[selectedTraitement]?.params || {}).map(([paramKey, paramDef]) => (
-                <div key={paramKey} className="param-container">
-                  <label className="param-label">{paramDef.label} :</label>
+              {Object.entries(catalog[selectedTraitement]?.params || {}).map(
+                ([paramKey, paramDef]) => (
+                  <div key={paramKey} className="param-container">
+                    <label className="param-label">{paramDef.label} :</label>
 
-                  {paramDef.type === "int" && (
-                    <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
-                      <input
+                    {paramDef.type === "int" && (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          width: "100%",
+                        }}
+                      >
+                        <input
+                          className="param-input"
+                          type="number"
+                          min={paramDef.range[0]}
+                          max={paramDef.range[1]}
+                          value={traitementParams[paramKey] ?? paramDef.default}
+                          onChange={(e) =>
+                            setTraitementParams({
+                              ...traitementParams,
+                              [paramKey]: parseInt(e.target.value, 10),
+                            })
+                          }
+                        />
+                        <small className="param-range">
+                          Valeurs possibles : {paramDef.range[0]} –{" "}
+                          {paramDef.range[1]}
+                        </small>
+                      </div>
+                    )}
+
+                    {paramDef.type_param === "choix" && (
+                      <select
                         className="param-input"
-                        type="number"
-                        min={paramDef.range[0]}
-                        max={paramDef.range[1]}
                         value={traitementParams[paramKey] ?? paramDef.default}
                         onChange={(e) =>
                           setTraitementParams({
                             ...traitementParams,
-                            [paramKey]: parseInt(e.target.value, 10),
+                            [paramKey]: e.target.value,
                           })
                         }
-                      />
-                      <small className="param-range">
-                        Valeurs possibles : {paramDef.range[0]} – {paramDef.range[1]}
-                      </small>
-                    </div>
-                  )}
-
-                  {paramDef.type_param === "choix" && (
-                    <select
-                      className="param-input"
-                      value={traitementParams[paramKey] ?? paramDef.default}
-                      onChange={(e) =>
-                        setTraitementParams({
-                          ...traitementParams,
-                          [paramKey]: e.target.value,
-                        })
-                      }
-                    >
-                      {paramDef.select.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-
-                  {paramDef.type_param === "choix_multiple" && (
-                    <div className="checkbox-group">
-                      {paramDef.select.map((opt) => {
-                        const current = traitementParams[paramKey] || [];
-                        return (
-                          <label key={opt} className="checkbox-label">
-                            <input
-                              type="checkbox"
-                              checked={current.includes(opt)}
-                              onChange={(e) => {
-                                const updated = e.target.checked ? [...current, opt] : current.filter((x) => x !== opt);
-                                setTraitementParams({
-                                  ...traitementParams,
-                                  [paramKey]: updated,
-                                });
-                              }}
-                            />
+                      >
+                        {paramDef.select.map((opt) => (
+                          <option key={opt} value={opt}>
                             {opt}
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
+                          </option>
+                        ))}
+                      </select>
+                    )}
 
-                  <hr className="param-divider" />
-                </div>
-              ))}
+                    {paramDef.type_param === "choix_multiple" && (
+                      <div className="checkbox-group">
+                        {paramDef.select.map((opt) => {
+                          const current = traitementParams[paramKey] || [];
+                          return (
+                            <label key={opt} className="checkbox-label">
+                              <input
+                                type="checkbox"
+                                checked={current.includes(opt)}
+                                onChange={(e) => {
+                                  const updated = e.target.checked
+                                    ? [...current, opt]
+                                    : current.filter((x) => x !== opt);
+                                  setTraitementParams({
+                                    ...traitementParams,
+                                    [paramKey]: updated,
+                                  });
+                                }}
+                              />
+                              {opt}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <hr className="param-divider" />
+                  </div>
+                ),
+              )}
             </div>
           )}
         </div>

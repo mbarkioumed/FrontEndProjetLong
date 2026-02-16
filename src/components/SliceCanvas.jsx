@@ -106,9 +106,9 @@ const SliceCanvas = ({
                 const yOffset = y * oWidth;
                 for (let x = 0; x < oWidth; x++) {
                     const val = oRow[x];
-                    if (val < 15) { 
-                        oData32[yOffset + x] = 0; // Transparent
-                    } else {
+                    if (val === 0) {
+  oData32[yOffset + x] = 0; // Transparent only for background
+} else {
                         const [r, g, b] = getJetColor(val);
                         oData32[yOffset + x] =
                             (255 << 24) |
@@ -123,7 +123,7 @@ const SliceCanvas = ({
 
             // Draw scaled
             ctx.globalAlpha = opacity;
-            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingEnabled = false;
             ctx.drawImage(tempCanvas, 0, 0, width, height);
             ctx.globalAlpha = 1.0;
         }

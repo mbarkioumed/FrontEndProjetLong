@@ -1029,3 +1029,23 @@ canvas {
     0 0 0 4px rgba(59, 130, 246, 0.18),
     0 18px 46px rgba(59, 130, 246, 0.22);
 }
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+
+.modal-content {
+  width: min(1300px, 96vw);
+  height: min(88vh, 920px);
+  overflow: auto;
+  background: var(--card-bg);
+  border-radius: 18px;
+  border: 1px solid var(--border-color);
+  padding: 14px;
+}

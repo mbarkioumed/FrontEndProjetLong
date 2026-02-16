@@ -5,7 +5,7 @@ import { api } from "../api/client";
 /**
  * PatientsExplorer
  * Props:
- *  - onOpenExam: ({ irmFiles: File[], mrsiFile: File|null, meta: {...} }) => Promise<void>
+ *  - onOpenExam: ({ irmFiles: File[], mrsiFile: File|null, maskFile: File|null, meta: {...} }) => Promise<void>
  */
 export default function PatientsExplorer({ onOpenExam }) {
   const { token } = useContext(AuthContext);
@@ -20,7 +20,8 @@ export default function PatientsExplorer({ onOpenExam }) {
 
   // ---------- helpers ----------
   const isNifti = (name = "") =>
-    name.toLowerCase().endsWith(".nii") || name.toLowerCase().endsWith(".nii.gz");
+    name.toLowerCase().endsWith(".nii") ||
+    name.toLowerCase().endsWith(".nii.gz");
 
   const normalizeRelPath = (p = "") => p.replaceAll("\\", "/");
 
@@ -41,6 +42,12 @@ export default function PatientsExplorer({ onOpenExam }) {
       if (!isNifti(f.name)) continue;
 
       map[rel] = f;
+      // NEW: also map without rootFolder prefix if possible
+      const parts = rel.split("/");
+      if (parts.length > 1) {
+        const withoutRoot = parts.slice(1).join("/");
+        map[withoutRoot] = f;
+      }
       entries.push({
         name: f.name,
         relativePath: rel,
@@ -66,9 +73,11 @@ export default function PatientsExplorer({ onOpenExam }) {
         const date = ex.date || ex.acquisition_date || ex.day || "Unknown date";
         const files = ex.files || ex.fichiers || [];
         const normFiles = (Array.isArray(files) ? files : []).map((f) => ({
-          relative_path: f.relative_path || f.relativePath || f.path || f.rel || "",
+          relative_path:
+            f.relative_path || f.relativePath || f.path || f.rel || "",
           type_analyse: f.type_analyse || f.type || f.modality || "",
-          modalites_IRM: f.modalites_IRM || f.modalite || f.mri_modality || null,
+          modalites_IRM:
+            f.modalites_IRM || f.modalite || f.mri_modality || null,
           name: f.name || f.nom || "",
         }));
         return { date, files: normFiles };
@@ -80,7 +89,7 @@ export default function PatientsExplorer({ onOpenExam }) {
 
   const normalizedPatients = useMemo(
     () => (patientsTree ? normalizeBackendTree(patientsTree) : []),
-    [patientsTree]
+    [patientsTree],
   );
 
   // ---------- UI handlers ----------
@@ -92,7 +101,7 @@ export default function PatientsExplorer({ onOpenExam }) {
     const hasRel = picked && picked.length && picked[0].webkitRelativePath;
     if (!hasRel) {
       setErr(
-        "Sélection de dossier non supportée ici. Utilise Chrome/Edge, ou colle un JSON de debug."
+        "Sélection de dossier non supportée ici. Utilise Chrome/Edge, ou colle un JSON de debug.",
       );
       return;
     }
@@ -129,11 +138,11 @@ export default function PatientsExplorer({ onOpenExam }) {
       setLoading(false);
     }
   };
-
   const pickExamFiles = (exam) => {
     // exam.files contains relative_path + type_analyse
     const irm = [];
     let mrsi = null;
+    let mask = null;
 
     for (const f of exam.files || []) {
       const rel = f.relative_path;
@@ -141,26 +150,46 @@ export default function PatientsExplorer({ onOpenExam }) {
 
       if (!rel) continue;
       const fileObj = fileMap[rel];
-      if (!fileObj) continue; // if not from folder selection
+      if (!fileObj) continue;
 
       if (type.includes("IRM")) irm.push(fileObj);
-      if (type.includes("MRSI")) mrsi = fileObj;
+      else if (type.includes("MRSI")) mrsi = fileObj;
+      else if (type.includes("MASK")) mask = fileObj;
     }
 
-    // If backend doesn't include type_analyse reliably,
-    // fallback guess by filename:
-    if (irm.length === 0 || !mrsi) {
+    // Fallback heuristique si type_analyse pas fiable
+    if (irm.length === 0 || !mrsi || !mask) {
       for (const f of exam.files || []) {
         const rel = f.relative_path;
         const fileObj = fileMap[rel];
         if (!fileObj) continue;
+
         const n = fileObj.name.toLowerCase();
-        if (n.includes("mrsi")) mrsi = mrsi || fileObj;
-        else irm.push(fileObj);
+
+        // mask / segmentation
+        const looksLikeMask =
+          n.includes("mask") ||
+          n.includes("seg") ||
+          n.includes("label") ||
+          n.includes("roi");
+
+        if (looksLikeMask) {
+          mask = mask || fileObj;
+          continue;
+        }
+
+        // mrsi
+        if (n.includes("mrsi")) {
+          mrsi = mrsi || fileObj;
+          continue;
+        }
+
+        // sinon on considère IRM
+        irm.push(fileObj);
       }
     }
 
-    return { irmFiles: irm, mrsiFile: mrsi };
+    return { irmFiles: irm, mrsiFile: mrsi, maskFile: mask };
   };
 
   const handleOpenExam = async (patientId, date, exam) => {
@@ -171,21 +200,24 @@ export default function PatientsExplorer({ onOpenExam }) {
     }
     if (!Object.keys(fileMap).length) {
       setErr(
-        "Pour ouvrir automatiquement un examen, il faut sélectionner un dossier (sinon le front n'a pas accès aux fichiers)."
+        "Pour ouvrir automatiquement un examen, il faut sélectionner un dossier (sinon le front n'a pas accès aux fichiers).",
       );
       return;
     }
 
-    const { irmFiles, mrsiFile } = pickExamFiles(exam);
+    const { irmFiles, mrsiFile, maskFile } = pickExamFiles(exam);
 
     if (!irmFiles.length && !mrsiFile) {
-      setErr("Impossible de retrouver les fichiers sur ton disque (fileMap vide ou chemins différents).");
+      setErr(
+        "Impossible de retrouver les fichiers sur ton disque (fileMap vide ou chemins différents).",
+      );
       return;
     }
 
     await onOpenExam({
       irmFiles,
       mrsiFile,
+      maskFile,
       meta: { patientId, date, exam },
     });
   };
@@ -233,8 +265,15 @@ export default function PatientsExplorer({ onOpenExam }) {
           </button>
         </div>
 
-        <p style={{ marginTop: 10, color: "var(--text-muted)", fontSize: "0.85rem" }}>
-          Debug : le JSON généré est affiché ci-dessous. Tu peux aussi coller un JSON ici si besoin.
+        <p
+          style={{
+            marginTop: 10,
+            color: "var(--text-muted)",
+            fontSize: "0.85rem",
+          }}
+        >
+          Debug : le JSON généré est affiché ci-dessous. Tu peux aussi coller un
+          JSON ici si besoin.
         </p>
 
         <textarea
@@ -272,7 +311,8 @@ export default function PatientsExplorer({ onOpenExam }) {
       <div style={{ marginTop: 16 }}>
         {!patientsTree && (
           <div style={{ color: "var(--text-muted)" }}>
-            Aucun patient chargé pour l’instant. Sélectionne un dossier puis “Envoyer”.
+            Aucun patient chargé pour l’instant. Sélectionne un dossier puis
+            “Envoyer”.
           </div>
         )}
 
@@ -293,7 +333,14 @@ export default function PatientsExplorer({ onOpenExam }) {
               background: "var(--card-bg)",
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
               <strong>Patient: {p.patientId}</strong>
               <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
                 {p.analyses.length} examen(s)
@@ -311,10 +358,23 @@ export default function PatientsExplorer({ onOpenExam }) {
                     border: "1px solid var(--border-color)",
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      flexWrap: "wrap",
+                    }}
+                  >
                     <div>
                       <strong>Date: {ex.date}</strong>
-                      <div style={{ marginTop: 4, color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                      <div
+                        style={{
+                          marginTop: 4,
+                          color: "var(--text-muted)",
+                          fontSize: "0.85rem",
+                        }}
+                      >
                         {ex.files.length} fichier(s)
                       </div>
                     </div>
@@ -328,23 +388,45 @@ export default function PatientsExplorer({ onOpenExam }) {
                     </button>
                   </div>
 
-                  <div style={{ marginTop: 8, fontFamily: "monospace", fontSize: "0.82rem" }}>
+                  <div
+                    style={{
+                      marginTop: 8,
+                      fontFamily: "monospace",
+                      fontSize: "0.82rem",
+                    }}
+                  >
                     {ex.files.map((f, j) => (
-                      <div key={`${f.relative_path}-${j}`} style={{ opacity: 0.95 }}>
+                      <div
+                        key={`${f.relative_path}-${j}`}
+                        style={{ opacity: 0.95 }}
+                      >
                         • {f.type_analyse || "?"}{" "}
                         {f.modalites_IRM ? `(mod: ${f.modalites_IRM})` : ""} —{" "}
-                        <span style={{ color: "var(--text-muted)" }}>{f.relative_path || f.name}</span>
+                        <span style={{ color: "var(--text-muted)" }}>
+                          {f.relative_path || f.name}
+                        </span>
                       </div>
                     ))}
                   </div>
 
                   {/* warning if fileMap cannot locate */}
-                  {Object.keys(fileMap).length > 0 && ex.files.some((f) => f.relative_path && !fileMap[f.relative_path]) && (
-                    <div style={{ marginTop: 8, color: "var(--text-muted)", fontSize: "0.8rem" }}>
-                      ⚠️ Certains chemins renvoyés par le backend ne matchent pas ceux du navigateur (relative_path).
-                      Vérifie que le backend renvoie bien les mêmes `relativePath` que `webkitRelativePath`.
-                    </div>
-                  )}
+                  {Object.keys(fileMap).length > 0 &&
+                    ex.files.some(
+                      (f) => f.relative_path && !fileMap[f.relative_path],
+                    ) && (
+                      <div
+                        style={{
+                          marginTop: 8,
+                          color: "var(--text-muted)",
+                          fontSize: "0.8rem",
+                        }}
+                      >
+                        ⚠️ Certains chemins renvoyés par le backend ne matchent
+                        pas ceux du navigateur (relative_path). Vérifie que le
+                        backend renvoie bien les mêmes `relativePath` que
+                        `webkitRelativePath`.
+                      </div>
+                    )}
                 </div>
               ))}
             </div>
