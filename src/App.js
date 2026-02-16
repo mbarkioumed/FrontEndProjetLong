@@ -561,17 +561,37 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData) => {
         [key]: { type_traitement: typeTraitement, params: validParams },
       };
 
-      const data = await workerService.postMessage({
-        url: `${API_URL}/traitements`,
-        options: {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify(bodyPayload),
+      console.time("TOTAL traitement");
+
+      console.time("fetch");
+      const response = await fetch(`${API_URL}/traitements`, {
+        method: "POST",
+        headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
+        body: JSON.stringify(bodyPayload),
       });
+      console.timeEnd("fetch");
+
+      if (!response.ok) throw new Error(`Erreur ${response.status}`);
+
+      console.time("blob");
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      console.timeEnd("blob");
+
+      console.time("worker");
+      const data = await workerService.postMessage({
+        url: blobUrl,
+        options: {},
+        type: "process",
+      });
+      console.timeEnd("worker");
+
+      console.timeEnd("TOTAL traitement");
+
+      URL.revokeObjectURL(blobUrl);
 
       const next = data?.[key];
       if (!next) throw new Error("Réponse traitement inattendue.");
