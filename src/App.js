@@ -139,7 +139,7 @@ function App() {
         ? [{ id: "base", label: "Original", data: { ...card.mrsiData, __versionId: "base" }, createdAt: Date.now() }]
         : []),
   });
-const pushVersionToCard = (cardId, type, versionLabel, nextData) => {
+const pushVersionToCard = (cardId, type, versionLabel, nextData, params = {}) => {
   const versionId = `t_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
   setIrmCards((prev) =>
@@ -153,14 +153,15 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData) => {
         ...nextData,
         __versionId: versionId,
         __backendKey: backendKey, // ✅ super important
+        _version_params : params,
       };
 
       if (type === "IRM") {
-        const irmHistory = [...(c.irmHistory || []), { id: versionId, label: versionLabel, data: tagged, createdAt: Date.now() }];
+        const irmHistory = [...(c.irmHistory || []), { id: versionId, params : params, label: versionLabel, data: tagged, createdAt: Date.now() }];
         return { ...c, irmHistory, irmData: tagged };
       }
 
-      const mrsiHistory = [...(c.mrsiHistory || []), { id: versionId, label: versionLabel, data: tagged, createdAt: Date.now() }];
+      const mrsiHistory = [...(c.mrsiHistory || []), { id: versionId, params : params, label: versionLabel, data: tagged, createdAt: Date.now() }];
       return { ...c, mrsiHistory, mrsiData: tagged };
     })
   );
@@ -601,10 +602,10 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData) => {
 
       if (next.type === "IRM") {
         setIrmResults(next);
-        pushVersionToCard(cardId, "IRM", label, next);
+        pushVersionToCard(cardId, "IRM", label, next, validParams);
       } else if (next.type === "MRSI") {
         setMrsiResults(next);
-        pushVersionToCard(cardId, "MRSI", label, next);
+        pushVersionToCard(cardId, "MRSI", label, next, validParams);
       } else {
         throw new Error("Type traitement inconnu.");
       }
@@ -764,6 +765,37 @@ const pushVersionToCard = (cardId, type, versionLabel, nextData) => {
                 mrsiHistory={card.mrsiHistory || []}
                 onSelectIrmVersion={(versionId) => selectIrmVersion(card.id, versionId)}
                 onSelectMrsiVersion={(versionId) => selectMrsiVersion(card.id, versionId)}
+                onDeleteVersion={(type, versionId) => {
+                  setIrmCards((prev) =>
+                    prev.map((c) => {
+                      if (c.id !== card.id) return c;
+
+                      if (type === "IRM") {
+                        const nextHistory = (c.irmHistory || []).filter((v) => v.id !== versionId);
+                        const nextData =
+                          c.irmData?.__versionId === versionId
+                            ? nextHistory.length
+                              ? nextHistory[nextHistory.length - 1].data
+                              : null
+                            : c.irmData;
+                        return { ...c, irmHistory: nextHistory, irmData: nextData };
+                      }
+
+                      if (type === "MRSI") {
+                        const nextHistory = (c.mrsiHistory || []).filter((v) => v.id !== versionId);
+                        const nextData =
+                          c.mrsiData?.__versionId === versionId
+                            ? nextHistory.length
+                              ? nextHistory[nextHistory.length - 1].data
+                              : null
+                            : c.mrsiData;
+                        return { ...c, mrsiHistory: nextHistory, mrsiData: nextData };
+                      }
+
+                      return c;
+                    })
+                  );
+                }}
                 isActive={card.id === activeCardId}
                 onSelect={() => setActiveCardId(card.id)}
                 job={cardJobs[card.id] || { loading: false, error: null }}

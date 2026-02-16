@@ -115,6 +115,7 @@ const IrmCard = ({
   onSelect,
   onDuplicate,
   onDelete,
+  onDeleteVersion,
   renderUploadForm,
   onFetchSpectrum,
   job, // per-card job state { loading, error }
@@ -302,7 +303,42 @@ const IrmCard = ({
   };
 
   const currentIrmVersion = irmData?.__versionId || "base";
-  const currentMrsiVersion = mrsiData?.__versionId || "base";
+ 
+
+  const activeIrmVersion = useMemo(() => {
+    if (!irmHistory?.length) return null;
+    return irmHistory.find(v => v.id === currentIrmVersion) || null;
+  }, [irmHistory, currentIrmVersion]);
+
+  const irmParamsText = useMemo(() => {
+    if (!activeIrmVersion?.params) return null;
+
+    return Object.entries(activeIrmVersion.params)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(" | ");
+  }, [activeIrmVersion]);
+
+   const currentMrsiVersion = mrsiData?.__versionId || "base";
+   const activeMrsiVersion = useMemo(() => {
+    if (!mrsiHistory?.length) return null;
+    return mrsiHistory.find(v => v.id === currentMrsiVersion) || null;
+  }, [mrsiHistory, currentMrsiVersion]);
+
+  const mrsiParamsText = useMemo(() => {
+    if (!activeMrsiVersion?.params) return null;
+
+    return Object.entries(activeMrsiVersion.params)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(" | ");
+  }, [activeMrsiVersion]);
+
+  /*const brain3DData = useMemo(() => {
+    if (!irmData) return null;
+    return {
+      ...irmData,
+      data_uint8: getData(irmData.dataRef),
+    };
+  }, [irmData?.dataRef]);*/
 
   // ✅ Carte vide : upload forms
   if (!irmData && !mrsiData) {
@@ -359,6 +395,8 @@ const IrmCard = ({
     axDispH,
   } = sliceDims || {};
 
+
+
   return (
     <div
       className={`card irm-card ${isActive ? "active" : ""}`}
@@ -404,9 +442,46 @@ const IrmCard = ({
                     </option>
                   ))}
                 </select>
+                
+                {/* Croix pour supprimer la version */}
+                {currentIrmVersion !== "base" && (
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation(); // empêche de sélectionner la carte
+                      onDeleteVersion?.( "IRM", currentIrmVersion); // appeler la fonction de suppression
+                    }}
+                    style={{
+                      cursor: "pointer",
+                      color: "var(--danger)",
+                      fontWeight: "bold",
+                      fontSize: 16,
+                      paddingLeft: 4,
+                    }}
+                    title="Supprimer cette version"
+                  >
+                    X
+                  </span>
+                )}
+
+                {irmParamsText && (
+                  <span
+                    style={{
+                      fontSize: 13,
+                      color: "var(--text-muted)",
+                      maxWidth: 400,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                    title={irmParamsText}
+                  >
+                    {irmParamsText}
+                  </span>
+                )}
               </div>
             )}
-
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
             {mrsiData && (
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 12, color: "var(--text-muted)" }}>MRSI version:</span>
@@ -422,6 +497,40 @@ const IrmCard = ({
                     </option>
                   ))}
                 </select>
+                {/* Croix pour supprimer la version */}
+                {currentMrsiVersion !== "base" && (
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation(); // empêche de sélectionner la carte
+                      onDeleteVersion?.( "MRSI", currentMrsiVersion); // appeler la fonction de suppression
+                    }}
+                    style={{
+                      cursor: "pointer",
+                      color: "var(--danger)",
+                      fontWeight: "bold",
+                      fontSize: 16,
+                      paddingLeft: 4,
+                    }}
+                    title="Supprimer cette version"
+                  >
+                    X
+                  </span>
+                )}
+                {mrsiParamsText && (
+                  <span
+                    style={{
+                      fontSize: 13,
+                      color: "var(--text-muted)",
+                      maxWidth: 400,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                    title={mrsiParamsText}
+                  >
+                    {mrsiParamsText}
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -548,13 +657,9 @@ const IrmCard = ({
                   overflow: "hidden",
                 }}
               >
-                <Brain3D
-                  irmData={{
-                    ...irmData,
-                    data_uint8: getData(irmData.dataRef),
-                  }}
-                  cursor3D={cursor3D}
-                />
+                {/*3D Brain trop lent voir peut-on l'alléger ?*/}
+                {/*<Brain3D irmData={brain3DData} cursor3D={cursor3D} />*/}
+
               </div>
               <span className="slice-label" style={{ marginTop: "0.5rem" }}>
                 3D Brain Preview
