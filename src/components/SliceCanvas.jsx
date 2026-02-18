@@ -101,14 +101,37 @@ const SliceCanvas = ({
             const oBuf8 = new Uint8ClampedArray(oBuf);
             const oData32 = new Uint32Array(oBuf);
 
+            let maxVal = 0;
+            let minVal = 255;
+            let nonZeroCount = 0;
+
             for (let y = 0; y < oHeight; y++) {
                 const oRow = overlay[y];
                 const yOffset = y * oWidth;
                 for (let x = 0; x < oWidth; x++) {
                     const val = oRow[x];
-                    if (val === 0) {
-  oData32[yOffset + x] = 0; // Transparent only for background
-} else {
+                    if (val > 0) {
+                        nonZeroCount++;
+                        if (val > maxVal) maxVal = val;
+                        if (val < minVal) minVal = val;
+                    }
+                }
+            }
+            if (nonZeroCount > 0) {
+                 console.log(`[SliceCanvas] Overlay Stats: NonZero=${nonZeroCount}, Min=${minVal}, Max=${maxVal}`);
+            } else {
+                 console.log("[SliceCanvas] Overlay is all zeros.");
+            }
+
+            for (let y = 0; y < oHeight; y++) {
+                const oRow = overlay[y];
+                const yOffset = y * oWidth;
+                for (let x = 0; x < oWidth; x++) {
+                    const val = oRow[x];
+                    // Thresholding to remove background noise (fixes "All Red Box" if noise is non-zero)
+                    if (val < 15) { 
+                        oData32[yOffset + x] = 0; 
+                    } else {
                         const [r, g, b] = getJetColor(val);
                         oData32[yOffset + x] =
                             (255 << 24) |

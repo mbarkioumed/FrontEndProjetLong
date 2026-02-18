@@ -140,6 +140,55 @@ const IrmCard = ({
   const [currentSpectrum, setCurrentSpectrum] = useState(null);
   const [prevMrsiData, setPrevMrsiData] = useState(null);
 
+  // --- FUSION STATE ---
+  const [fusionData, setFusionData] = useState(null);
+  const [fusionOpacity, setFusionOpacity] = useState(0.5);
+  const [forceCenter, setForceCenter] = useState(true); // Default ON per request
+  const [fusionChannel, setFusionChannel] = useState("");
+  const [isFusing, setIsFusing] = useState(false);
+  const [fusionError, setFusionError] = useState(null);
+
+  // --- FUSION HANDLER ---
+  const handleFusionClick = async () => {
+    if (!irmData || !mrsiData) return;
+    setIsFusing(true);
+    setFusionError(null);
+    try {
+        const mriName = irmData.nom_fichier || irmData.nom;
+        const mrsiName = mrsiData.nom;
+        
+        let url = `http://127.0.0.1:8000/fusion/?mri=${mriName}&mrsi=${mrsiName}&force_center=${forceCenter}`;
+        if (fusionChannel !== "") {
+            url += `&channel=${fusionChannel}`;
+        }
+        
+        const res = await fetch(url);
+        const json = await res.json();
+        
+        if (json.error) throw new Error(json.error);
+        
+        // Decode base64 data to Uint8Array
+        const binaryString = window.atob(json.data_b64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        setFusionData({
+            ...json,
+            data_uint8: bytes,
+            transform_matrix: json.transform_matrix // Store the matrix
+        });
+        
+    } catch (e) {
+        console.error("Fusion error", e);
+        setFusionError(e.message);
+    } finally {
+        setIsFusing(false);
+    }
+  };
+
   // ✅ detect version changes too (so center resets when you switch a processed version)
   const irmVersionKey = irmData?.__versionId || "none";
   const mrsiVersionKey = mrsiData?.__versionId || "none";
@@ -324,6 +373,58 @@ const IrmCard = ({
     };
   }, [irmData?.shape, sagOriented, corOriented, axOriented]);
 
+  // --- MEMOIZED FUSION SLICES ---
+  // Reuse the same slicing logic as MRI since Fusion data matches MRI geometry
+  const fusionSag = useMemo(() => {
+    if (!fusionData || !fusionData.data_uint8 || !irmData?.shape) return null;
+    const vol = fusionData.data_uint8;
+    const [X, Y, Z] = irmData.shape; // Trust MRI shape
+    const sx = sliceIndices.sagittal;
+    if (sx < 0 || sx >= X) return null;
+    
+    // Safety check size
+    if (vol.length !== X * Y * Z) return null;
+
+    const slice = [];
+    for (let y = 0; y < Y; y++) {
+      const offset = sx * Y * Z + y * Z;
+      slice.push(vol.subarray(offset, offset + Z));
+    }
+    return orient2D(slice, orientIRM.sagittal);
+  }, [fusionData, irmData?.shape, sliceIndices.sagittal, orientIRM.sagittal]);
+
+  const fusionCor = useMemo(() => {
+    if (!fusionData || !fusionData.data_uint8 || !irmData?.shape) return null;
+    const vol = fusionData.data_uint8;
+    const [X, Y, Z] = irmData.shape;
+    const sy = sliceIndices.coronal;
+    if (sy < 0 || sy >= Y) return null;
+    
+    const slice = [];
+    for (let x = 0; x < X; x++) {
+      const row = new Uint8Array(Z);
+      for (let z = 0; z < Z; z++) row[z] = vol[x * Y * Z + sy * Z + z];
+      slice.push(row);
+    }
+    return orient2D(slice, orientIRM.coronal);
+  }, [fusionData, irmData?.shape, sliceIndices.coronal, orientIRM.coronal]);
+
+  const fusionAx = useMemo(() => {
+    if (!fusionData || !fusionData.data_uint8 || !irmData?.shape) return null;
+    const vol = fusionData.data_uint8;
+    const [X, Y, Z] = irmData.shape;
+    const sz = sliceIndices.axial;
+    if (sz < 0 || sz >= Z) return null;
+
+    const slice = [];
+    for (let x = 0; x < X; x++) {
+      const row = new Uint8Array(Y);
+      for (let y = 0; y < Y; y++) row[y] = vol[x * Y * Z + y * Z + sz];
+      slice.push(row);
+    }
+    return orient2D(slice, orientIRM.axial);
+  }, [fusionData, irmData?.shape, sliceIndices.axial, orientIRM.axial]);
+
   // --- MEMOIZED MRSI SLICE ---
   const mrsiSlice = useMemo(() => {
     if (!mrsiData?.shape) return [];
@@ -354,18 +455,26 @@ const IrmCard = ({
     return forwardPoint(x, y, sliceW, sliceH, o);
   };
 
-  const handleVoxelClick = async (xVal, yVal) => {
+  const handleVoxelClick = async (xVal, yVal, zVal = null) => {
     if (!mrsiData?.shape) return;
     const [X, Y] = mrsiData.shape;
     const x = Math.max(0, Math.min(xVal, X - 1));
     const y = Math.max(0, Math.min(yVal, Y - 1));
-    const z = mrsiSliceIndex;
+    const z = zVal !== null ? zVal : mrsiSliceIndex; // Use provided Z or state Z
+
+    if (zVal !== null) setMrsiSliceIndex(z); // Sync state if Z provided
 
     setSelectedVoxel({ x, y, z });
 
     if (onFetchSpectrum && mrsiData?.nom) {
+      console.log(`[handleVoxelClick] Fetching spectrum for ${mrsiData.nom} at (${x},${y},${z})`);
       const data = await onFetchSpectrum(mrsiData.nom, x, y, z);
-      if (data && data.spectrum) setCurrentSpectrum(data);
+      console.log("[handleVoxelClick] Received data:", data);
+      if (data && data.spectrum) {
+          setCurrentSpectrum(data);
+      } else {
+          console.warn("[handleVoxelClick] No spectrum data received or invalid format", data);
+      }
     }
   };
 
@@ -698,8 +807,8 @@ const IrmCard = ({
             <div className="slice-control">
               <SliceCanvas
                 data={sagOriented}
-                overlay={maskSagOriented}
-                opacity={0.45}
+                overlay={fusionSag ? fusionSag : maskSagOriented}
+                opacity={fusionSag ? fusionOpacity : 0.45}
                 title={`Sagittal (X=${sliceIndices.sagittal})`}
                 onClick={(xDisp, yDisp) => {
                   const p = inversePoint(
@@ -742,8 +851,8 @@ const IrmCard = ({
             <div className="slice-control">
               <SliceCanvas
                 data={corOriented}
-                overlay={maskCorOriented}
-                opacity={0.45}
+                overlay={fusionCor ? fusionCor : maskCorOriented}
+                opacity={fusionCor ? fusionOpacity : 0.45}
                 title={`Coronal (Y=${sliceIndices.coronal})`}
                 onClick={(xDisp, yDisp) => {
                   const p = inversePoint(
@@ -753,20 +862,34 @@ const IrmCard = ({
                     corDispH,
                     orientIRM.coronal,
                   );
-                  setSliceIndices((prev) => ({
-                    ...prev,
-                    sagittal: p.y,
-                    axial: p.x,
-                  }));
-                  setCursor3D((prev) => ({ ...prev, x: p.y, z: p.x }));
+                  const nx = p.y;   // Sagittal index
+                  const ny = p.x;   // Axial index
+                  // Coronal View: X=Sagittal, Y=Axial. Slice=Coronal (Y).
+                  // MRI Coords: (nx, sliceIndices.coronal, ny)
+                  setSliceIndices((prev) => ({ ...prev, sagittal: nx, axial: ny }));
+                  setCursor3D((prev) => ({ ...prev, x: nx, z: ny }));
+
+                  if (fusionData && fusionData.transform_matrix) {
+                    const M = fusionData.transform_matrix;
+                    const x = nx;
+                    const y = sliceIndices.coronal;
+                    const z = ny;
+                    const i = Math.round(M[0][0] * x + M[0][1] * y + M[0][2] * z + M[0][3]);
+                    const j = Math.round(M[1][0] * x + M[1][1] * y + M[1][2] * z + M[1][3]);
+                    const k = Math.round(M[2][0] * x + M[2][1] * y + M[2][2] * z + M[2][3]);
+                    console.log(`[FusionClick] MRI(${x},${y},${z}) -> MRSI(${i},${j},${k})`);
+                    handleVoxelClick(i, j, k);
+                  }
                 }}
                 crosshair={crosshairXY(
                   "coronal",
                   corW,
                   corH,
-                  cursor3D?.z,
-                  cursor3D?.x,
+                  sliceIndices.axial,
+                  sliceIndices.sagittal
                 )}
+                sliceLineH={sliceIndices.axial}
+                sliceLineV={sliceIndices.sagittal}
               />
               <input
                 type="range"
@@ -786,8 +909,8 @@ const IrmCard = ({
             <div className="slice-control">
               <SliceCanvas
                 data={axOriented}
-                overlay={maskAxOriented}
-                opacity={0.45}
+                overlay={fusionAx} // The Fusion Component
+                opacity={fusionOpacity}
                 title={`Axial (Z=${sliceIndices.axial})`}
                 onClick={(xDisp, yDisp) => {
                   const p = inversePoint(
@@ -797,12 +920,28 @@ const IrmCard = ({
                     axDispH,
                     orientIRM.axial,
                   );
+                  // Fixed: p.x corresponds to MRI Y (Coronal), p.y to MRI X (Sagittal)
+                  const mriX = p.y; 
+                  const mriY = p.x; 
+
                   setSliceIndices((prev) => ({
                     ...prev,
-                    sagittal: p.y,
-                    coronal: p.x,
+                    sagittal: mriX,
+                    coronal: mriY,
                   }));
-                  setCursor3D((prev) => ({ ...prev, x: p.y, y: p.x }));
+                  setCursor3D((prev) => ({ ...prev, x: mriX, y: mriY })); 
+
+                  if (fusionData && fusionData.transform_matrix) {
+                    const M = fusionData.transform_matrix;
+                    const x = mriX;
+                    const y = mriY;
+                    const z = sliceIndices.axial;
+                    const i = Math.round(M[0][0] * x + M[0][1] * y + M[0][2] * z + M[0][3]);
+                    const j = Math.round(M[1][0] * x + M[1][1] * y + M[1][2] * z + M[1][3]);
+                    const k = Math.round(M[2][0] * x + M[2][1] * y + M[2][2] * z + M[2][3]);
+                    console.log(`[FusionClick] MRI(${x},${y},${z}) -> MRSI(${i},${j},${k})`);
+                    handleVoxelClick(i, j, k);
+                  }
                 }}
                 crosshair={crosshairXY(
                   "axial",
@@ -825,85 +964,113 @@ const IrmCard = ({
                 className="volume-slider"
               />
             </div>
-
-            {/* 3D Brain */}
-            <div
-              className="slice-control"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                height: "100%",
-                minHeight: "350px",
-              }}
-            >
-              <div
-                style={{
-                  flex: 1,
-                  width: "100%",
-                  minHeight: "300px",
-                  background: "black",
-                  borderRadius: "4px",
-                  overflow: "hidden",
-                }}
-              >
-                {/*3D Brain trop lent voir peut-on l'alléger ?*/}
-                <Brain3D irmData={irmData} cursor3D={cursor3D} />
-              </div>
-              <span className="slice-label" style={{ marginTop: "0.5rem" }}>
-                3D Brain Preview
-              </span>
-            </div>
           </>
         )}
-
-        {/* --- MRSI --- */}
-        {mrsiData && (
-          <>
-            <div className="slice-control">
-              <SliceCanvas
-                data={mrsiSlice}
-                title={`MRSI Slice (Z=${mrsiSliceIndex})`}
-                onClick={(x, y) => handleVoxelClick(x, y)}
-                selectedVoxel={selectedVoxel}
-                isMRSI={true}
-              />
-              <input
-                type="range"
-                min="0"
-                max={mrsiData.shape[2] - 1}
-                value={mrsiSliceIndex}
-                onChange={(e) =>
-                  setMrsiSliceIndex(parseInt(e.target.value, 10))
-                }
-                className="volume-slider"
-              />
-            </div>
-
-            <div className="slice-control" style={{ gridColumn: "span 2" }}>
-              {currentSpectrum ? (
-                <SpectrumChart data={currentSpectrum} />
-              ) : (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    height: "100%",
-                    background: "#f8f9fa",
-                    borderRadius: "8px",
-                    border: "1px dashed #ccc",
-                  }}
+      </div>
+      
+      {/* --- FUSION CONTROLS --- */}
+      {irmData && mrsiData && (
+        <div style={{ marginTop: "1rem", padding: "1rem", background: "var(--bg-secondary)", borderRadius: "8px" }}>
+            <h4>Fusion MRI-MRSI</h4>
+            {fusionError && <div style={{color:"red", fontSize:"0.8rem", marginBottom:"0.5rem"}}>{fusionError}</div>}
+             <div style={{display:"flex", alignItems:"center", gap:"1rem", flexWrap:"wrap"}}>
+                <button
+                    className="btn-primary"
+                    onClick={handleFusionClick}
+                    disabled={isFusing}
                 >
-                  <p>
-                    Sélectionnez un voxel sur la carte MRSI pour voir le spectre
-                  </p>
-                </div>
-              )}
-            </div>
-          </>
-        )}
+                    {isFusing ? "Fusion en cours..." : "Générer / Mettre à jour la Fusion"}
+                </button>
+                    <div style={{display:"flex", alignItems:"center", gap:"2rem", flexWrap:"wrap"}}>
+                        <label style={{display:"flex", alignItems:"center", gap:"0.5rem", cursor:"pointer"}}>
+                            <input 
+                                type="checkbox" 
+                                checked={forceCenter} 
+                                onChange={(e) => setForceCenter(e.target.checked)} 
+                            />
+                            <span>Force Center</span>
+                        </label>
+                        
+                        <div style={{display:"flex", alignItems:"center", gap:"0.5rem"}}>
+                             <span>Metabolite Index:</span>
+                             <input 
+                                type="number" 
+                                min="0"
+                                placeholder="All (Sum)"
+                                value={fusionChannel}
+                                onChange={(e) => setFusionChannel(e.target.value)}
+                                style={{width: "80px", padding:"0.2rem"}}
+                             />
+                        </div>
+                        
+                        {fusionData && (
+                            <div style={{display:"flex", alignItems:"center", gap:"0.5rem"}}>
+                                <span>Opacité:</span>
+                                <input 
+                                    type="range" 
+                                    min="0" 
+                                    max="1" 
+                                    step="0.05" 
+                                    value={fusionOpacity} 
+                                    onChange={(e) => setFusionOpacity(parseFloat(e.target.value))}
+                                />
+                                <span>{Math.round(fusionOpacity*100)}%</span>
+                            </div>
+                        )}
+                        
+                        {fusionData && (
+                             <div style={{fontSize:"0.8rem", color:"var(--text-muted)"}}>
+                                {fusionData.info}
+                             </div>
+                        )}
+                    </div>
+             </div>
+        </div>
+      )}
 
-        {/* --- Upload if missing --- */}
+      {/* --- 3D / Spectrum (Bottom) --- */}
+      <div style={{
+          display: "grid", 
+          gridTemplateColumns: "1fr 1fr", 
+          gap: "1rem", 
+          marginTop: "1rem"
+      }}>
+         {/* 3D Brain */}
+        <div className="card-panel">
+            <h5 style={{margin:"0 0 0.5rem 0"}}>3D Brain Preview</h5>
+             <Brain3D 
+                irmData={irmData} 
+                maskData={maskData} 
+                cursor={cursor3D}
+                width={300}
+                height={300}
+            />
+        </div>
+
+        {/* Spectrum */}
+        <div className="card-panel" style={{display:"flex", flexDirection:"column"}}>
+            <h5 style={{margin:"0 0 0.5rem 0"}}>Spectre MRSI</h5>
+            {currentSpectrum ? (
+                <SpectrumChart 
+                    data={currentSpectrum} 
+                    label={`Voxel (${selectedVoxel?.x}, ${selectedVoxel?.y}, ${selectedVoxel?.z})`}
+                 />
+            ) : (
+                <div style={{
+                    flex:1, 
+                    display:"flex", 
+                    alignItems:"center", 
+                    justifyContent:"center", 
+                    borderRadius: "8px",
+                    color: "var(--text-muted)"
+                }}>
+                    {mrsiData ? (fusionData ? "Cliquez sur l'IRM fusionnée pour voir le spectre" : "Cliquez sur l'IRM pour sélectionner un voxel") : "Pas de MRSI chargé"}
+                </div>
+            )}
+        </div>
+      </div>
+
+      {/* --- Upload if missing --- */}
         {!irmData && (
           <div
             className="slice-control card"
@@ -920,7 +1087,6 @@ const IrmCard = ({
             {renderUploadForm("MRSI", cardId)}
           </div>
         )}
-      </div>
     </div>
   );
 };

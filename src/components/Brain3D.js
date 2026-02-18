@@ -2,7 +2,7 @@ import React from "react";
 import Plot from "react-plotly.js";
 import { getData } from "../utils/dataCache"; // <-- adapte le chemin si besoin
 
-const Brain3D = ({ irmData, cursor3D }) => {
+const Brain3D = ({ irmData, cursor3D, width, height }) => {
   const [trace1, setTrace1] = React.useState({});
   const [isCalculating, setIsCalculating] = React.useState(false);
 
@@ -84,7 +84,7 @@ const Brain3D = ({ irmData, cursor3D }) => {
   if (trace2) dataPlot.push(trace2);
 
   return (
-    <div style={{ width: "100%", height: "100%", position: "relative" }}>
+    <div style={{ width: width || "100%", height: height || "100%", position: "relative" }}>
       {isCalculating && (
         <div style={{
           position: "absolute", inset: 0,
@@ -99,6 +99,8 @@ const Brain3D = ({ irmData, cursor3D }) => {
         data={dataPlot}
         layout={{
           uirevision: irmData?.nom_fichier || "true",
+          width: width, 
+          height: height,
           margin: { l: 0, r: 0, b: 0, t: 0 },
           scene: {
             xaxis: { visible: false },
@@ -107,12 +109,12 @@ const Brain3D = ({ irmData, cursor3D }) => {
             aspectmode: "data",
             bgcolor: "black",
           },
-          autosize: true,
+          autosize: !width, // Only autosize if no width provided
           paper_bgcolor: "black",
           plot_bgcolor: "black",
           showlegend: false,
         }}
-        useResizeHandler
+        useResizeHandler={!width}
         style={{ width: "100%", height: "100%" }}
       />
     </div>
