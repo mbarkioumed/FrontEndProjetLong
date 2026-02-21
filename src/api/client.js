@@ -25,7 +25,7 @@ export const api = {
     return data;
   },
 
-  // ✅ Dataset patients -> tri patient/date
+  //      Dataset patients -> tri patient/date
   uploadJsonDataset: async (datasetJson, token) => {
     const headers = { "Content-Type": "application/json" };
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -41,7 +41,7 @@ export const api = {
     return data;
   },
 
-  // ✅ Upload IRM depuis un objet File (utile pour Patients)
+  //      Upload IRM depuis un objet File (utile pour Patients)
   uploadIRMFile: async (file, token) => {
     const formData = new FormData();
     formData.append("fichier", file);
@@ -61,7 +61,7 @@ export const api = {
     return data;
   },
 
-  // ✅ Upload MRSI depuis un objet File (utile pour Patients)
+  //      Upload MRSI depuis un objet File (utile pour Patients)
   uploadMRSIFile: async (file, token) => {
     const formData = new FormData();
     formData.append("fichier", file);

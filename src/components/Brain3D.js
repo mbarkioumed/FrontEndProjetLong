@@ -24,7 +24,7 @@ const Brain3D = ({ irmData, cursor3D, width, height }) => {
 
     if (!irmData || !irmData.shape) return;
 
-    // ✅ récupérer les bytes depuis le cache si data_uint8 absent
+    //      récupérer les bytes depuis le cache si data_uint8 absent
     const data = irmData.data_uint8 || (irmData.dataRef ? getData(irmData.dataRef) : null);
     if (!data) return;
 
@@ -55,7 +55,7 @@ const Brain3D = ({ irmData, cursor3D, width, height }) => {
         }
       }
 
-      // ✅ évite isomin/isomax identiques (sinon surface invisible)
+      //      évite isomin/isomax identiques (sinon surface invisible)
       const isoMin = Math.max(1, Math.floor(maxVal * 0.35));
       const isoMax = Math.max(isoMin + 1, Math.floor(maxVal * 0.85));
 

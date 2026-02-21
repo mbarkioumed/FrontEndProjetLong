@@ -33,13 +33,13 @@ const SliceCanvas = ({
   crosshair,
   // (optionnel) pour activer un "focus mode" côté card quand zoom>1
   onZoomChange,
-  // ✅ (optionnel) agrandir la vue
+  //      (optionnel) agrandir la vue
   onFocus,
 }) => {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
 
-  // ✅ Zoom/Pan state
+  //      Zoom/Pan state
   const [zoom, setZoom] = useState(1); // 1..8
   const [pan, setPan] = useState({ x: 0, y: 0 });
 
@@ -169,7 +169,7 @@ const SliceCanvas = ({
     onZoomChange?.(zoom);
   }, [zoom, onZoomChange]);
 
-  // ✅ Zoom à la molette (SANS Ctrl) centré souris
+  //      Zoom à la molette (SANS Ctrl) centré souris
   const handleWheel = (e) => {
     e.preventDefault();
 
@@ -195,7 +195,7 @@ const SliceCanvas = ({
     });
   };
 
-  // ✅ Pan au drag gauche seulement quand zoom>1
+  //      Pan au drag gauche seulement quand zoom>1
   const handleMouseDown = (e) => {
     if (e.button !== 0) return; // clic gauche
     if (zoom <= 1) return; // si pas zoomé, on laisse le click voxel
@@ -232,7 +232,7 @@ const SliceCanvas = ({
     resetView();
   };
 
-  // ✅ Click voxel (si pas de pan)
+  //      Click voxel (si pas de pan)
   const handleClick = (e) => {
     if (!onClick || !canvasRef.current || !containerRef.current) return;
 
@@ -263,7 +263,7 @@ const SliceCanvas = ({
     <div className="viz-container" style={{ position: "relative" }}>
       <span className="slice-label">{title}</span>
 
-      {/* ✅ bouton agrandir */}
+      {/*      bouton agrandir */}
       {onFocus && (
         <button
           type="button"
@@ -279,7 +279,7 @@ const SliceCanvas = ({
         </button>
       )}
 
-      {/* ✅ toolbar */}
+      {/*      toolbar */}
       <div
         style={{
           position: "absolute",

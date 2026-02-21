@@ -717,7 +717,7 @@ function App() {
   };
 
   // ===============================
-  // ✅ Post-Traitement per card (parallel-safe + versions)
+  //      Post-Traitement per card (parallel-safe + versions)
   // ===============================
   const runTraitement = async (
     dataInstance,
@@ -743,7 +743,7 @@ function App() {
         if (params[k] !== undefined) validParams[k] = params[k];
       });
 
-      // ✅ PATCH: backend expects "metabolites" (not "meta")
+      //      PATCH: backend expects "metabolites" (not "meta")
       if ("meta" in validParams) {
         validParams.metabolites = validParams.meta;
         delete validParams.meta;
@@ -809,7 +809,7 @@ function App() {
     }
   };
 
-  // ✅ Run on ALL cards in parallel
+  //      Run on ALL cards in parallel
   const runTraitementOnAllCards = async () => {
     const dt = traitementParams.dataType;
 

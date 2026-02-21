@@ -125,7 +125,7 @@ const IrmCard = ({
   onSelectIrmVersion,
   onSelectMrsiVersion,
 }) => {
-  // ✅ Focus modal state
+  //      Focus modal state
   const [focusedView, setFocusedView] = useState(null); // "sagittal" | "coronal" | "axial" | null
 
   useEffect(() => {
@@ -198,7 +198,7 @@ const IrmCard = ({
     }
   };
 
-  // ✅ detect version changes too
+  //      detect version changes too
   const irmVersionKey = irmData?.__versionId || "none";
   const mrsiVersionKey = mrsiData?.__versionId || "none";
 
@@ -491,7 +491,7 @@ const IrmCard = ({
       .join(" | ");
   }, [activeMrsiVersion]);
 
-  // ✅ Carte vide : upload forms
+  //      Carte vide : upload forms
   if (!irmData && !mrsiData) {
     return (
       <div
@@ -600,7 +600,7 @@ const IrmCard = ({
               {mrsiData ? `MRSI: ${mrsiData.nom}` : ""}
             </h2>
 
-            {/* ✅ Versions selectors (IRM / MRSI) */}
+            {/*      Versions selectors (IRM / MRSI) */}
             <div
               style={{ display: "flex", gap: 10, flexWrap: "wrap" }}
               onClick={(e) => e.stopPropagation()}
