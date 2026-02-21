@@ -1,3 +1,4 @@
+// src/App.js
 import React, { useState, useEffect, useMemo } from "react";
 import { useContext } from "react";
 import "./App.css";
@@ -8,9 +9,7 @@ import IrmCard from "./components/IrmCard";
 
 import { storeData } from "./utils/dataCache";
 
-const worker = new Worker(
-  new URL("./dataProcessor.worker.js", import.meta.url),
-);
+const worker = new Worker(new URL("./dataProcessor.worker.js", import.meta.url));
 
 const workerService = {
   requestId: 0,
@@ -133,10 +132,12 @@ function App() {
       [cardId]: { ...(prev[cardId] || {}), error: msg },
     }));
   };
+
   const [examModalOpen, setExamModalOpen] = useState(false);
   const [examModalCardIds, setExamModalCardIds] = useState([]);
 
   // ===============================
+  // Version history helpers
   // ===============================
   const ensureHistoryInit = (card) => ({
     ...card,
@@ -165,6 +166,7 @@ function App() {
           ]
         : []),
   });
+
   const pushVersionToCard = (
     cardId,
     type,
@@ -252,9 +254,18 @@ function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
     () => localStorage.getItem("sidebarCollapsed") === "true",
   );
+
+  //     Right sidebar: now "contextual"
   const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(
     () => localStorage.getItem("rightSidebarCollapsed") === "true",
   );
+
+  //     Auto-hide (collapse) right sidebar on Patients by default (but still toggleable)
+  useEffect(() => {
+    if (view === "patients") {
+      setIsRightSidebarCollapsed(true);
+    }
+  }, [view]);
 
   useEffect(() => {
     localStorage.setItem("sidebarCollapsed", isSidebarCollapsed);
@@ -717,7 +728,7 @@ function App() {
   };
 
   // ===============================
-  //      Post-Traitement per card (parallel-safe + versions)
+  // Post-Traitement per card (parallel-safe + versions)
   // ===============================
   const runTraitement = async (
     dataInstance,
@@ -732,9 +743,7 @@ function App() {
 
     try {
       const key =
-        dataInstance.__backendKey ||
-        dataInstance.nom_fichier ||
-        dataInstance.nom;
+        dataInstance.__backendKey || dataInstance.nom_fichier || dataInstance.nom;
 
       // Keep only params defined by selected traitement
       const paramDefs = catalog[typeTraitement]?.params || {};
@@ -743,7 +752,7 @@ function App() {
         if (params[k] !== undefined) validParams[k] = params[k];
       });
 
-      //      PATCH: backend expects "metabolites" (not "meta")
+      // PATCH: backend expects "metabolites" (not "meta")
       if ("meta" in validParams) {
         validParams.metabolites = validParams.meta;
         delete validParams.meta;
@@ -753,9 +762,6 @@ function App() {
         [key]: { type_traitement: typeTraitement, params: validParams },
       };
 
-      console.time("TOTAL traitement");
-
-      console.time("fetch");
       const response = await fetch(`${API_URL}/traitements`, {
         method: "POST",
         headers: {
@@ -764,24 +770,17 @@ function App() {
         },
         body: JSON.stringify(bodyPayload),
       });
-      console.timeEnd("fetch");
 
       if (!response.ok) throw new Error(`Erreur ${response.status}`);
 
-      console.time("blob");
       const blob = await response.blob();
       const blobUrl = URL.createObjectURL(blob);
-      console.timeEnd("blob");
 
-      console.time("worker");
       const data = await workerService.postMessage({
         url: blobUrl,
         options: {},
         type: "process",
       });
-      console.timeEnd("worker");
-
-      console.timeEnd("TOTAL traitement");
 
       URL.revokeObjectURL(blobUrl);
 
@@ -809,7 +808,6 @@ function App() {
     }
   };
 
-  //      Run on ALL cards in parallel
   const runTraitementOnAllCards = async () => {
     const dt = traitementParams.dataType;
 
@@ -817,12 +815,7 @@ function App() {
       const instance =
         dt === "IRM" ? card.irmData : dt === "MRSI" ? card.mrsiData : null;
       if (!instance) return;
-      return runTraitement(
-        instance,
-        card.id,
-        selectedTraitement,
-        traitementParams,
-      );
+      return runTraitement(instance, card.id, selectedTraitement, traitementParams);
     });
 
     await Promise.allSettled(tasks);
@@ -835,8 +828,8 @@ function App() {
     <div className="card">
       <h2>Bienvenue sur Plateforme Cancer</h2>
       <p>
-        Cette application permet de visualiser et d'analyser des données
-        médicales IRM et MRSI.
+        Cette application permet de visualiser et d'analyser des données médicales IRM et
+        MRSI.
       </p>
       <div className="info-grid" style={{ marginTop: "2rem" }}>
         <div className="info-card">
@@ -859,18 +852,11 @@ function App() {
           <label>Fichier NIfTI (.nii, .nii.gz)</label>
           <input type="file" name="fichier" accept=".nii,.gz" required />
         </div>
-        <button
-          type="submit"
-          className="btn-primary"
-          disabled={loading || !backendStatus}
-        >
+        <button type="submit" className="btn-primary" disabled={loading || !backendStatus}>
           {loading ? "Traitement..." : `Analyser ${type}`}
         </button>
         {!backendStatus && (
-          <p
-            className="status-error"
-            style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}
-          >
+          <p className="status-error" style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}>
             Backend hors ligne
           </p>
         )}
@@ -882,19 +868,22 @@ function App() {
   if (!user) return <Login />;
 
   const activeJob = activeCardId ? cardJobs[activeCardId] : null;
+
   const canRunActive =
     !!activeCard &&
-    ((traitementParams.dataType === "IRM" &&
-      !!activeCard?.irmData?.nom_fichier) ||
+    ((traitementParams.dataType === "IRM" && !!activeCard?.irmData?.nom_fichier) ||
       (traitementParams.dataType === "MRSI" && !!activeCard?.mrsiData?.nom)) &&
     !activeJob?.loading;
 
   const canRunAll =
     irmCards.some((c) =>
-      traitementParams.dataType === "IRM"
-        ? !!c.irmData?.nom_fichier
-        : !!c.mrsiData?.nom,
+      traitementParams.dataType === "IRM" ? !!c.irmData?.nom_fichier : !!c.mrsiData?.nom,
     ) && !loading;
+
+  //     Contextual right sidebar header/title
+  const rightSidebarTitle =
+    view === "irm" ? "Post-Traitement" : view === "patients" ? "Patients • Aide" : "Outils";
+  const rightSidebarEmoji = view === "irm" ? "⚙️" : view === "patients" ? "🧩" : "🧰";
 
   return (
     <div className="App">
@@ -954,9 +943,7 @@ function App() {
       >
         <div className="top-bar">
           <div className="status-indicator">
-            <div
-              className={`dot ${backendStatus ? "connected" : "disconnected"}`}
-            ></div>
+            <div className={`dot ${backendStatus ? "connected" : "disconnected"}`}></div>
             <span>Backend {backendStatus ? "Connecté" : "Déconnecté"}</span>
           </div>
           <div className="user-info" style={{ display: "flex", gap: 12 }}>
@@ -1000,49 +987,33 @@ function App() {
                 irmHistory={card.irmHistory || []}
                 mrsiHistory={card.mrsiHistory || []}
                 maskData={card.maskData}
-                onSelectIrmVersion={(versionId) =>
-                  selectIrmVersion(card.id, versionId)
-                }
-                onSelectMrsiVersion={(versionId) =>
-                  selectMrsiVersion(card.id, versionId)
-                }
+                onSelectIrmVersion={(versionId) => selectIrmVersion(card.id, versionId)}
+                onSelectMrsiVersion={(versionId) => selectMrsiVersion(card.id, versionId)}
                 onDeleteVersion={(type, versionId) => {
                   setIrmCards((prev) =>
                     prev.map((c) => {
                       if (c.id !== card.id) return c;
 
                       if (type === "IRM") {
-                        const nextHistory = (c.irmHistory || []).filter(
-                          (v) => v.id !== versionId,
-                        );
+                        const nextHistory = (c.irmHistory || []).filter((v) => v.id !== versionId);
                         const nextData =
                           c.irmData?.__versionId === versionId
                             ? nextHistory.length
                               ? nextHistory[nextHistory.length - 1].data
                               : null
                             : c.irmData;
-                        return {
-                          ...c,
-                          irmHistory: nextHistory,
-                          irmData: nextData,
-                        };
+                        return { ...c, irmHistory: nextHistory, irmData: nextData };
                       }
 
                       if (type === "MRSI") {
-                        const nextHistory = (c.mrsiHistory || []).filter(
-                          (v) => v.id !== versionId,
-                        );
+                        const nextHistory = (c.mrsiHistory || []).filter((v) => v.id !== versionId);
                         const nextData =
                           c.mrsiData?.__versionId === versionId
                             ? nextHistory.length
                               ? nextHistory[nextHistory.length - 1].data
                               : null
                             : c.mrsiData;
-                        return {
-                          ...c,
-                          mrsiHistory: nextHistory,
-                          mrsiData: nextData,
-                        };
+                        return { ...c, mrsiHistory: nextHistory, mrsiData: nextData };
                       }
 
                       return c;
@@ -1061,10 +1032,7 @@ function App() {
                       irmData: card.irmData ? { ...card.irmData } : null,
                       mrsiData: card.mrsiData ? { ...card.mrsiData } : null,
                       maskData: card.maskData ? { ...card.maskData } : null,
-                      irmHistory: (card.irmHistory || []).map((v) => ({
-                        ...v,
-                        data: { ...v.data },
-                      })),
+                      irmHistory: (card.irmHistory || []).map((v) => ({ ...v, data: { ...v.data } })),
                       mrsiHistory: (card.mrsiHistory || []).map((v) => ({
                         ...v,
                         data: { ...v.data },
@@ -1137,14 +1105,10 @@ function App() {
           </div>
         )}
 
-        {view === "patients" && (
-          <PatientsExplorer onOpenExam={openExamFromPatients} />
-        )}
+        {view === "patients" && <PatientsExplorer onOpenExam={openExamFromPatients} />}
+
         {examModalOpen && (
-          <div
-            className="modal-overlay"
-            onClick={() => setExamModalOpen(false)}
-          >
+          <div className="modal-overlay" onClick={() => setExamModalOpen(false)}>
             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
               {/* Header du modal */}
               <div
@@ -1178,12 +1142,8 @@ function App() {
                     maskData={card.maskData}
                     irmHistory={card.irmHistory || []}
                     mrsiHistory={card.mrsiHistory || []}
-                    onSelectIrmVersion={(versionId) =>
-                      selectIrmVersion(card.id, versionId)
-                    }
-                    onSelectMrsiVersion={(versionId) =>
-                      selectMrsiVersion(card.id, versionId)
-                    }
+                    onSelectIrmVersion={(versionId) => selectIrmVersion(card.id, versionId)}
+                    onSelectMrsiVersion={(versionId) => selectMrsiVersion(card.id, versionId)}
                     onFetchSpectrum={fetchSpectrum}
                     renderUploadForm={renderUploadForm}
                     job={cardJobs[card.id] || { loading: false, error: null }}
@@ -1199,155 +1159,123 @@ function App() {
         )}
       </div>
 
-      {/* RIGHT SIDEBAR */}
-      <div
-        className={`sidebar right-sidebar ${isRightSidebarCollapsed ? "collapsed" : ""}`}
-      >
+      {/* RIGHT SIDEBAR (contextual) */}
+      <div className={`sidebar right-sidebar ${isRightSidebarCollapsed ? "collapsed" : ""}`}>
         <div className="sidebar-header">
-          <span className="emoji">⚙️</span>
-          <h1>Post-Traitement</h1>
+          <span className="emoji">{rightSidebarEmoji}</span>
+          <h1>{rightSidebarTitle}</h1>
         </div>
 
         <button
           className="sidebar-toggle right"
           onClick={() => setIsRightSidebarCollapsed(!isRightSidebarCollapsed)}
-          title={
-            isRightSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"
-          }
+          title={isRightSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
         >
           {isRightSidebarCollapsed ? "←" : "→"}
         </button>
 
-        <div className="nav-links">
-          {/* Traitement choice */}
-          <div className="nav-dropdown">
-            <div
-              className="nav-item"
-              onClick={() => setIsTraitementOpen(!isTraitementOpen)}
-            >
-              <span className={`arrow ${isTraitementOpen ? "" : "close"}`}>
-                ▼
-              </span>
-              <span className="label">
-                {catalog[selectedTraitement]?.label || "Catalogue non trouvé"}
-              </span>
+        {/*     IRM view: keep Post-Traitement UI */}
+        {view === "irm" && (
+          <div className="nav-links">
+            {/* Traitement choice */}
+            <div className="nav-dropdown">
+              <div className="nav-item" onClick={() => setIsTraitementOpen(!isTraitementOpen)}>
+                <span className={`arrow ${isTraitementOpen ? "" : "close"}`}>▼</span>
+                <span className="label">
+                  {catalog[selectedTraitement]?.label || "Catalogue non trouvé"}
+                </span>
+              </div>
+
+              {isTraitementOpen && (
+                <div className="dropdown-menu">
+                  {Object.entries(catalog).map(([key, val]) => (
+                    <div
+                      key={key}
+                      className="dropdown-option"
+                      onClick={() => {
+                        setSelectedTraitement(key);
+                        const defaults = {};
+                        Object.entries(val.params || {}).forEach(([k, v]) => (defaults[k] = v.default));
+                        const allowedTypes = val.type || [];
+                        defaults.dataType = allowedTypes[0] || null;
+                        setTraitementParams(defaults);
+                        setIsTraitementOpen(false);
+                      }}
+                    >
+                      {val.label}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {isTraitementOpen && (
-              <div className="dropdown-menu">
-                {Object.entries(catalog).map(([key, val]) => (
-                  <div
-                    key={key}
-                    className="dropdown-option"
-                    onClick={() => {
-                      setSelectedTraitement(key);
-                      const defaults = {};
-                      Object.entries(val.params || {}).forEach(
-                        ([k, v]) => (defaults[k] = v.default),
+            {/* Run traitement (ACTIVE CARD) */}
+            <button
+              className="btn-primary"
+              onClick={() => {
+                if (!activeCard) return;
+
+                const instance =
+                  traitementParams.dataType === "IRM"
+                    ? activeCard?.irmData
+                    : traitementParams.dataType === "MRSI"
+                      ? activeCard?.mrsiData
+                      : null;
+
+                if (!instance) return;
+
+                runTraitement(instance, activeCard.id, selectedTraitement, traitementParams);
+              }}
+              disabled={!canRunActive}
+            >
+              {activeJob?.loading ? "Traitement..." : "Lancer sur la carte active"}
+            </button>
+
+            {/* Run traitement (ALL CARDS) */}
+            <button className="btn-secondary" onClick={runTraitementOnAllCards} disabled={!canRunAll}>
+              Lancer sur toutes les cartes
+            </button>
+
+            {/* Params */}
+            <div className="nav-item" onClick={() => setIsParamOpen(!isParamOpen)}>
+              <span className="icon">⚙️</span>
+              <span className="label">Paramètres :</span>
+            </div>
+
+            {isParamOpen && (
+              <div className="traitement-form">
+                {/* DataType */}
+                <div className="param-container">
+                  <label className="param-label">Type de données :</label>
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    {["IRM", "MRSI"].map((dt) => {
+                      const isPossible = catalog[selectedTraitement]?.type?.includes(dt);
+                      const isSelected = traitementParams.dataType === dt;
+                      return (
+                        <div
+                          key={dt}
+                          className={`nav-item param-choice ${isSelected ? "selected" : ""} ${
+                            !isPossible ? "disabled" : ""
+                          }`}
+                          onClick={() => {
+                            if (!isPossible) return;
+                            setTraitementParams({ ...traitementParams, dataType: dt });
+                          }}
+                        >
+                          <span className="label">{dt}</span>
+                        </div>
                       );
-                      const allowedTypes = val.type || [];
-                      defaults.dataType = allowedTypes[0] || null;
-                      setTraitementParams(defaults);
-                      setIsTraitementOpen(false);
-                    }}
-                  >
-                    {val.label}
+                    })}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Run traitement (ACTIVE CARD) */}
-          <button
-            className="btn-primary"
-            onClick={() => {
-              if (!activeCard) return;
-
-              const instance =
-                traitementParams.dataType === "IRM"
-                  ? activeCard?.irmData
-                  : traitementParams.dataType === "MRSI"
-                    ? activeCard?.mrsiData
-                    : null;
-
-              if (!instance) return;
-
-              runTraitement(
-                instance,
-                activeCard.id,
-                selectedTraitement,
-                traitementParams,
-              );
-            }}
-            disabled={!canRunActive}
-          >
-            {activeJob?.loading
-              ? "Traitement..."
-              : "Lancer sur la carte active"}
-          </button>
-
-          {/* Run traitement (ALL CARDS) */}
-          <button
-            className="btn-secondary"
-            onClick={runTraitementOnAllCards}
-            disabled={!canRunAll}
-          >
-            Lancer sur toutes les cartes
-          </button>
-
-          {/* Params */}
-          <div
-            className="nav-item"
-            onClick={() => setIsParamOpen(!isParamOpen)}
-          >
-            <span className="icon">⚙️</span>
-            <span className="label">Paramètres :</span>
-          </div>
-
-          {isParamOpen && (
-            <div className="traitement-form">
-              {/* DataType */}
-              <div className="param-container">
-                <label className="param-label">Type de données :</label>
-                <div style={{ display: "flex", gap: "0.5rem" }}>
-                  {["IRM", "MRSI"].map((dt) => {
-                    const isPossible =
-                      catalog[selectedTraitement]?.type?.includes(dt);
-                    const isSelected = traitementParams.dataType === dt;
-                    return (
-                      <div
-                        key={dt}
-                        className={`nav-item param-choice ${isSelected ? "selected" : ""} ${!isPossible ? "disabled" : ""}`}
-                        onClick={() => {
-                          if (!isPossible) return;
-                          setTraitementParams({
-                            ...traitementParams,
-                            dataType: dt,
-                          });
-                        }}
-                      >
-                        <span className="label">{dt}</span>
-                      </div>
-                    );
-                  })}
                 </div>
-              </div>
 
-              {/* Specific params */}
-              {Object.entries(catalog[selectedTraitement]?.params || {}).map(
-                ([paramKey, paramDef]) => (
+                {/* Specific params */}
+                {Object.entries(catalog[selectedTraitement]?.params || {}).map(([paramKey, paramDef]) => (
                   <div key={paramKey} className="param-container">
                     <label className="param-label">{paramDef.label} :</label>
 
                     {paramDef.type === "int" && (
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          width: "100%",
-                        }}
-                      >
+                      <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
                         <input
                           className="param-input"
                           type="number"
@@ -1362,8 +1290,7 @@ function App() {
                           }
                         />
                         <small className="param-range">
-                          Valeurs possibles : {paramDef.range[0]} –{" "}
-                          {paramDef.range[1]}
+                          Valeurs possibles : {paramDef.range[0]} – {paramDef.range[1]}
                         </small>
                       </div>
                     )}
@@ -1415,11 +1342,70 @@ function App() {
 
                     <hr className="param-divider" />
                   </div>
-                ),
-              )}
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/*     Patients view: make the right sidebar useful (context + guidance) */}
+        {view === "patients" && (
+          <div className="nav-links">
+            <div className="card" style={{ margin: 12 }}>
+              <h3 style={{ marginTop: 0 }}>🧭 Workflow (Patients)</h3>
+              <ol style={{ paddingLeft: 18, marginBottom: 10, color: "var(--text-muted)" }}>
+                <li>Choisir un dossier dataset (Chrome/Edge)</li>
+                <li>Envoyer le JSON au backend → affichage patients/exams</li>
+                <li>Sélectionner des examens + lancer la quantification</li>
+              </ol>
+
+              <div
+                style={{
+                  padding: 10,
+                  borderRadius: 10,
+                  border: "1px solid var(--border-color)",
+                  background: "rgba(255,255,255,0.02)",
+                  color: "var(--text-muted)",
+                  fontSize: "0.9rem",
+                }}
+              >
+                <strong>Note “predict1 / predict2”</strong>
+                <div style={{ marginTop: 6 }}>
+                  Côté backend actuel, seule <b>predict1</b> est déclarée (PREDICTION_MAP). <br />
+                  <b>predict2</b> sert de placeholder : si tu la choisis et que le backend ne la gère pas,
+                  tu auras “Type de traitement inconnu”.
+                </div>
+              </div>
+
+              <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                <button className="btn-secondary" onClick={() => setView("irm")}>
+                  Aller à l’onglet IRM (post-traitement)
+                </button>
+                <button
+                  className="btn-secondary"
+                  onClick={() => setIsRightSidebarCollapsed(true)}
+                >
+                  Masquer ce panneau
+                </button>
+              </div>
             </div>
-          )}
-        </div>
+
+
+          </div>
+        )}
+
+        {/*  Home/Other: minimal content */}
+        {view !== "irm" && view !== "patients" && (
+          <div className="nav-links">
+            <div className="card" style={{ margin: 12, color: "var(--text-muted)" }}>
+              <h3 style={{ marginTop: 0 }}>👋 Astuce</h3>
+              <p style={{ marginBottom: 0 }}>
+                Va sur <b>Upload IRM</b> pour accéder au post-traitement, ou <b>Patients</b> pour explorer
+                le dataset.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
