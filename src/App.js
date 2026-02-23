@@ -79,7 +79,7 @@ function App() {
 
   // (Legacy global results kept to avoid breaking other parts)
   const [irmResults, setIrmResults] = useState(null);
-  const [reference3DData, setReference3DData] = useState(null);
+
   const [mrsiResults, setMrsiResults] = useState(null);
 
   const [isTraitementOpen, setIsTraitementOpen] = useState(false);
@@ -390,7 +390,7 @@ function App() {
         };
 
         setIrmResults(tagged);
-        setReference3DData(tagged);
+
 
         setIrmCards((prev) =>
           prev.map((c) => {
@@ -520,6 +520,32 @@ function App() {
   };
 
   // ===============================
+  // Layer color defaults per modality
+  // ===============================
+  const LAYER_COLORS = {
+    T1: null,           // grayscale (base)
+    T1C: "#ff6b6b",     // red
+    T2: "#4ecdc4",      // teal
+    Flair: "#ffe66d",   // yellow
+    IRM: "#a29bfe",     // purple (fallback)
+  };
+
+  // ===============================
+  // Layer helpers (passed to IrmCard)
+  // ===============================
+  const updateLayer = (cardId, layerIdx, patch) => {
+    setIrmCards((prev) =>
+      prev.map((c) => {
+        if (c.id !== cardId || !c.irmLayers) return c;
+        const layers = c.irmLayers.map((l, i) =>
+          i === layerIdx ? { ...l, ...patch } : l,
+        );
+        return { ...c, irmLayers: layers };
+      }),
+    );
+  };
+
+  // ===============================
   // Patients -> Open Exam
   // ===============================
   const openExamFromPatients = async ({ irmFiles, mrsiFile, maskFile }) => {
@@ -527,7 +553,9 @@ function App() {
     setError("");
 
     try {
-      const irmFile = irmFiles && irmFiles.length ? irmFiles[0] : null;
+      // irmFiles is now [{file, modality}, ...]
+      const safeIrmFiles =
+        irmFiles && irmFiles.length ? irmFiles : [];
 
       // Create a fresh card that becomes active
       const baseCardId = Date.now();
@@ -539,6 +567,7 @@ function App() {
           irmData: null,
           mrsiData: null,
           maskData: null,
+          irmLayers: [],
           irmHistory: [],
           mrsiHistory: [],
         },
@@ -548,50 +577,74 @@ function App() {
       setExamModalOpen(true);
 
       // -----------------
-      // IRM
+      // IRM — upload ALL files in parallel
       // -----------------
-      if (irmFile) {
-        const formData = new FormData();
-        formData.append("fichier", irmFile);
+      if (safeIrmFiles.length > 0) {
+        const uploadOne = async ({ file, modality }) => {
+          const formData = new FormData();
+          formData.append("fichier", file);
 
-        const response = await fetch(`${API_URL}/upload-irm/`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        });
-        if (!response.ok) throw new Error("Erreur upload IRM");
+          const response = await fetch(`${API_URL}/upload-irm/`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData,
+          });
+          if (!response.ok)
+            throw new Error(`Erreur upload IRM (${modality})`);
 
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
+          const blob = await response.blob();
+          const blobUrl = URL.createObjectURL(blob);
 
-        const irmData = await workerService.postMessage({
-          url: blobUrl,
-          options: {},
-          type: "process",
-        });
+          const irmData = await workerService.postMessage({
+            url: blobUrl,
+            options: {},
+            type: "process",
+          });
 
-        URL.revokeObjectURL(blobUrl);
+          URL.revokeObjectURL(blobUrl);
 
-        const tagged = {
-          ...irmData,
-          __versionId: "base",
-          __backendKey: irmData?.nom_fichier, // pour post-traitements
+          return {
+            ...irmData,
+            __versionId: "base",
+            __backendKey: irmData?.nom_fichier,
+            __modality: modality,
+          };
         };
 
-        setIrmResults(tagged);
-        setReference3DData(tagged);
+        const results = await Promise.all(
+          safeIrmFiles.map((entry) => uploadOne(entry)),
+        );
+
+        // Build layers: first = base (full opacity, no tint), rest = overlay
+        const layers = results.map((tagged, i) => ({
+          label: tagged.__modality || `IRM-${i}`,
+          data: tagged,
+          opacity: i === 0 ? 1.0 : 0.5,
+          color:
+            i === 0
+              ? null
+              : LAYER_COLORS[tagged.__modality] ||
+                LAYER_COLORS.IRM,
+          visible: true,
+        }));
+
+        // First layer is also the irmData for backward compat
+        const baseTagged = results[0];
+        setIrmResults(baseTagged);
+
 
         setIrmCards((prev) =>
           prev.map((c) =>
             c.id === baseCardId
               ? {
                   ...c,
-                  irmData: tagged,
+                  irmData: baseTagged,
+                  irmLayers: layers,
                   irmHistory: [
                     {
                       id: "base",
                       label: "Original",
-                      data: tagged,
+                      data: baseTagged,
                       createdAt: Date.now(),
                     },
                   ],
@@ -629,7 +682,7 @@ function App() {
         const tagged = {
           ...mrsiData,
           __versionId: "base",
-          __backendKey: mrsiData?.nom, //  pour post-traitements
+          __backendKey: mrsiData?.nom,
         };
 
         setMrsiResults(tagged);
@@ -661,8 +714,6 @@ function App() {
         const formData = new FormData();
         formData.append("fichier", maskFile);
 
-        // ⚠️ TEMPORAIRE : on passe par upload-irm pour récupérer un volume exploitable côté front.
-        // Idéal : endpoint /upload-mask/ côté backend pour préserver les labels.
         const response = await fetch(`${API_URL}/upload-irm/`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
@@ -700,7 +751,7 @@ function App() {
         );
       }
 
-      setView("patients"); // on reste sur Patients
+      setView("patients");
       setExamModalOpen(true);
     } catch (e) {
       setError(`Ouverture examen impossible : ${e.message}`);
@@ -715,7 +766,7 @@ function App() {
   const fetchSpectrum = async (name, x, y, z) => {
     if (x == null || y == null || z == null) return null;
     try {
-      const res = await fetch(`${API_URL}/spectrum/${name}/${x}/${y}/${z}`, {
+      const res = await fetch(`${API_URL}/spectrum/${encodeURIComponent(name)}/${x}/${y}/${z}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error("Erreur affichage spectre");
@@ -987,6 +1038,8 @@ function App() {
                 irmHistory={card.irmHistory || []}
                 mrsiHistory={card.mrsiHistory || []}
                 maskData={card.maskData}
+                irmLayers={card.irmLayers || []}
+                onUpdateLayer={(idx, patch) => updateLayer(card.id, idx, patch)}
                 onSelectIrmVersion={(versionId) => selectIrmVersion(card.id, versionId)}
                 onSelectMrsiVersion={(versionId) => selectMrsiVersion(card.id, versionId)}
                 onDeleteVersion={(type, versionId) => {
@@ -1142,6 +1195,8 @@ function App() {
                     maskData={card.maskData}
                     irmHistory={card.irmHistory || []}
                     mrsiHistory={card.mrsiHistory || []}
+                    irmLayers={card.irmLayers || []}
+                    onUpdateLayer={(idx, patch) => updateLayer(card.id, idx, patch)}
                     onSelectIrmVersion={(versionId) => selectIrmVersion(card.id, versionId)}
                     onSelectMrsiVersion={(versionId) => selectMrsiVersion(card.id, versionId)}
                     onFetchSpectrum={fetchSpectrum}

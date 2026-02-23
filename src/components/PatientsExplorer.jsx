@@ -170,7 +170,7 @@ export default function PatientsExplorer({ onOpenExam }) {
       const fileObj = fileMap[rel];
       if (!fileObj) continue;
 
-      if (type.includes("IRM")) irm.push(fileObj);
+      if (type.includes("IRM")) irm.push({ file: fileObj, modality: f.modalites_IRM || "IRM" });
       else if (type.includes("MRSI")) mrsi = fileObj;
       else if (type.includes("MASK")) mask = fileObj;
     }
@@ -197,7 +197,7 @@ export default function PatientsExplorer({ onOpenExam }) {
           mrsi = mrsi || fileObj;
           continue;
         }
-        irm.push(fileObj);
+        irm.push({ file: fileObj, modality: "IRM" });
       }
     }
 

@@ -31,6 +31,8 @@ const SliceCanvas = ({
   overlay,
   opacity = 0.5,
   crosshair,
+  // Multi-layer support: [{data2D, opacity, color}, ...]
+  layers,
   // (optionnel) pour activer un "focus mode" côté card quand zoom>1
   onZoomChange,
   //      (optionnel) agrandir la vue
@@ -78,11 +80,22 @@ const SliceCanvas = ({
     return [r * 255, g * 255, b * 255];
   };
 
-  const height = data?.length || 0;
-  const width = data?.[0]?.length || 0;
+  // Parse hex color to [r,g,b]
+  const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result
+      ? [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)]
+      : [255, 255, 255];
+  };
+
+  // Determine dimensions from layers or data
+  const activeLayers = layers && layers.length > 0 ? layers : null;
+  const baseData = activeLayers ? activeLayers[0]?.data2D : data;
+  const height = baseData?.length || 0;
+  const width = baseData?.[0]?.length || 0;
 
   useEffect(() => {
-    if (!canvasRef.current || !data) return;
+    if (!canvasRef.current || (!data && !activeLayers)) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d", { alpha: false });
@@ -94,25 +107,80 @@ const SliceCanvas = ({
       canvas.height = height;
     }
 
-    // 1) Base MRI
-    const imgData = ctx.createImageData(width, height);
-    const buf = new ArrayBuffer(imgData.data.length);
-    const buf8 = new Uint8ClampedArray(buf);
-    const data32 = new Uint32Array(buf);
+    // === Multi-layer rendering ===
+    if (activeLayers) {
+      // Clear to black
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, width, height);
 
-    for (let y = 0; y < height; y++) {
-      const row = data[y];
-      const yOffset = y * width;
-      for (let x = 0; x < width; x++) {
-        const val = row[x];
-        data32[yOffset + x] =
-          (255 << 24) | (val << 16) | (val << 8) | val;
+      for (let li = 0; li < activeLayers.length; li++) {
+        const layer = activeLayers[li];
+        if (!layer.data2D || layer.opacity <= 0) continue;
+
+        const lH = layer.data2D.length;
+        const lW = layer.data2D[0]?.length || 0;
+        if (lW === 0 || lH === 0) continue;
+
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = lW;
+        tempCanvas.height = lH;
+        const tempCtx = tempCanvas.getContext("2d");
+        const imgData = tempCtx.createImageData(lW, lH);
+        const buf = new ArrayBuffer(imgData.data.length);
+        const buf8 = new Uint8ClampedArray(buf);
+        const data32 = new Uint32Array(buf);
+
+        const tint = layer.color ? hexToRgb(layer.color) : null;
+
+        for (let y = 0; y < lH; y++) {
+          const row = layer.data2D[y];
+          const yOffset = y * lW;
+          for (let x = 0; x < lW; x++) {
+            const val = row[x];
+            if (tint) {
+              // Tinted: multiply grayscale by tint color
+              const factor = val / 255;
+              const r = Math.floor(tint[0] * factor);
+              const g = Math.floor(tint[1] * factor);
+              const b = Math.floor(tint[2] * factor);
+              data32[yOffset + x] =
+                (255 << 24) | (b << 16) | (g << 8) | r;
+            } else {
+              // Grayscale
+              data32[yOffset + x] =
+                (255 << 24) | (val << 16) | (val << 8) | val;
+            }
+          }
+        }
+        imgData.data.set(buf8);
+        tempCtx.putImageData(imgData, 0, 0);
+
+        ctx.globalAlpha = layer.opacity;
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(tempCanvas, 0, 0, width, height);
+        ctx.globalAlpha = 1.0;
       }
-    }
-    imgData.data.set(buf8);
-    ctx.putImageData(imgData, 0, 0);
+    } else {
+      // === Original single-data rendering ===
+      const imgData = ctx.createImageData(width, height);
+      const buf = new ArrayBuffer(imgData.data.length);
+      const buf8 = new Uint8ClampedArray(buf);
+      const data32 = new Uint32Array(buf);
 
-    // 2) Overlay
+      for (let y = 0; y < height; y++) {
+        const row = data[y];
+        const yOffset = y * width;
+        for (let x = 0; x < width; x++) {
+          const val = row[x];
+          data32[yOffset + x] =
+            (255 << 24) | (val << 16) | (val << 8) | val;
+        }
+      }
+      imgData.data.set(buf8);
+      ctx.putImageData(imgData, 0, 0);
+    }
+
+    // 2) Overlay (fusion / mask) — drawn on top of all layers
     if (overlay && overlay.length > 0) {
       const oHeight = overlay.length;
       const oWidth = overlay[0].length;
@@ -162,7 +230,7 @@ const SliceCanvas = ({
     if (!isMRSI && crosshair) {
       drawCrosshair(ctx, crosshair.x, crosshair.y, width, height);
     }
-  }, [data, overlay, opacity, selectedVoxel, isMRSI, crosshair, width, height]);
+  }, [data, layers, activeLayers, overlay, opacity, selectedVoxel, isMRSI, crosshair, width, height]);
 
   // 🔔 remonte info zoom vers la card (optionnel)
   useEffect(() => {

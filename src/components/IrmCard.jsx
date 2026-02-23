@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from "react";
 import SliceCanvas from "./SliceCanvas";
-import Brain3D from "./Brain3D";
+
 import SpectrumChart from "./SpectrumChart";
 import { getData } from "../utils/dataCache";
 
@@ -124,6 +124,8 @@ const IrmCard = ({
   mrsiHistory = [],
   onSelectIrmVersion,
   onSelectMrsiVersion,
+  irmLayers = [],
+  onUpdateLayer,
 }) => {
   //      Focus modal state
   const [focusedView, setFocusedView] = useState(null); // "sagittal" | "coronal" | "axial" | null
@@ -289,6 +291,68 @@ const IrmCard = ({
     }
     return orient2D(slice, orientIRM.axial);
   }, [irmData?.dataRef, irmData?.shape, sliceIndices.axial, orientIRM.axial]);
+
+  // --- MULTI-LAYER SLICES ---
+  const hasLayers = irmLayers.length > 1;
+
+  const sagLayerSlices = useMemo(() => {
+    if (!hasLayers) return null;
+    return irmLayers
+      .filter((l) => l.visible)
+      .map((layer) => {
+        const vol = getData(layer.data?.dataRef);
+        if (!vol || !layer.data?.shape) return { data2D: null, opacity: layer.opacity, color: layer.color };
+        const [X, Y, Z] = layer.data.shape;
+        const sx = sliceIndices.sagittal;
+        if (sx < 0 || sx >= X) return { data2D: null, opacity: layer.opacity, color: layer.color };
+        const slice = [];
+        for (let y = 0; y < Y; y++) {
+          const offset = sx * Y * Z + y * Z;
+          slice.push(vol.subarray(offset, offset + Z));
+        }
+        return { data2D: orient2D(slice, orientIRM.sagittal), opacity: layer.opacity, color: layer.color };
+      });
+  }, [hasLayers, irmLayers, sliceIndices.sagittal, orientIRM.sagittal]);
+
+  const corLayerSlices = useMemo(() => {
+    if (!hasLayers) return null;
+    return irmLayers
+      .filter((l) => l.visible)
+      .map((layer) => {
+        const vol = getData(layer.data?.dataRef);
+        if (!vol || !layer.data?.shape) return { data2D: null, opacity: layer.opacity, color: layer.color };
+        const [X, Y, Z] = layer.data.shape;
+        const sy = sliceIndices.coronal;
+        if (sy < 0 || sy >= Y) return { data2D: null, opacity: layer.opacity, color: layer.color };
+        const slice = [];
+        for (let x = 0; x < X; x++) {
+          const row = new Uint8Array(Z);
+          for (let z = 0; z < Z; z++) row[z] = vol[x * Y * Z + sy * Z + z];
+          slice.push(row);
+        }
+        return { data2D: orient2D(slice, orientIRM.coronal), opacity: layer.opacity, color: layer.color };
+      });
+  }, [hasLayers, irmLayers, sliceIndices.coronal, orientIRM.coronal]);
+
+  const axLayerSlices = useMemo(() => {
+    if (!hasLayers) return null;
+    return irmLayers
+      .filter((l) => l.visible)
+      .map((layer) => {
+        const vol = getData(layer.data?.dataRef);
+        if (!vol || !layer.data?.shape) return { data2D: null, opacity: layer.opacity, color: layer.color };
+        const [X, Y, Z] = layer.data.shape;
+        const sz = sliceIndices.axial;
+        if (sz < 0 || sz >= Z) return { data2D: null, opacity: layer.opacity, color: layer.color };
+        const slice = [];
+        for (let x = 0; x < X; x++) {
+          const row = new Uint8Array(Y);
+          for (let y = 0; y < Y; y++) row[y] = vol[x * Y * Z + y * Z + sz];
+          slice.push(row);
+        }
+        return { data2D: orient2D(slice, orientIRM.axial), opacity: layer.opacity, color: layer.color };
+      });
+  }, [hasLayers, irmLayers, sliceIndices.axial, orientIRM.axial]);
 
   const maskSagOriented = useMemo(() => {
     const vol = getData(maskData?.dataRef);
@@ -781,6 +845,7 @@ const IrmCard = ({
               <div className="slice-control">
                 <SliceCanvas
                   data={sagOriented}
+                  layers={sagLayerSlices}
                   overlay={fusionSag ? fusionSag : maskSagOriented}
                   opacity={fusionSag ? fusionOpacity : 0.45}
                   title={`Sagittal (X=${sliceIndices.sagittal})`}
@@ -826,6 +891,7 @@ const IrmCard = ({
               <div className="slice-control">
                 <SliceCanvas
                   data={corOriented}
+                  layers={corLayerSlices}
                   overlay={fusionCor ? fusionCor : maskCorOriented}
                   opacity={fusionCor ? fusionOpacity : 0.45}
                   title={`Coronal (Y=${sliceIndices.coronal})`}
@@ -902,6 +968,7 @@ const IrmCard = ({
               <div className="slice-control">
                 <SliceCanvas
                   data={axOriented}
+                  layers={axLayerSlices}
                   overlay={fusionAx}
                   opacity={fusionOpacity}
                   title={`Axial (Z=${sliceIndices.axial})`}
@@ -974,6 +1041,103 @@ const IrmCard = ({
             </>
           )}
         </div>
+
+        {/* --- LAYER CONTROLS --- */}
+        {hasLayers && onUpdateLayer && (
+          <div
+            style={{
+              marginTop: "0.75rem",
+              padding: "0.75rem 1rem",
+              borderRadius: 12,
+              border: "1px solid var(--border-color)",
+              background: "rgba(255,255,255,0.02)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 8,
+              }}
+            >
+              <strong style={{ fontSize: 13 }}>🎨 Couches IRM ({irmLayers.length})</strong>
+            </div>
+
+            {irmLayers.map((layer, idx) => (
+              <div
+                key={idx}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "4px 0",
+                  opacity: layer.visible ? 1 : 0.4,
+                }}
+              >
+                {/* Color dot */}
+                <span
+                  style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: "50%",
+                    background: layer.color || "#ccc",
+                    border: "1px solid rgba(255,255,255,0.3)",
+                    flexShrink: 0,
+                  }}
+                />
+
+                {/* Label */}
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    minWidth: 50,
+                    color: "var(--text-color)",
+                  }}
+                >
+                  {layer.label}
+                </span>
+
+                {/* Visibility toggle */}
+                <button
+                  type="button"
+                  onClick={() => onUpdateLayer(idx, { visible: !layer.visible })}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: 14,
+                    padding: "2px 4px",
+                  }}
+                  title={layer.visible ? "Masquer" : "Afficher"}
+                >
+                  {layer.visible ? "👁" : "🚫"}
+                </button>
+
+                {/* Opacity slider */}
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={Math.round(layer.opacity * 100)}
+                  onChange={(e) =>
+                    onUpdateLayer(idx, {
+                      opacity: parseInt(e.target.value, 10) / 100,
+                    })
+                  }
+                  style={{ flex: 1, minWidth: 80 }}
+                  title={`Opacité: ${Math.round(layer.opacity * 100)}%`}
+                />
+
+                <span style={{ fontSize: 11, color: "var(--text-muted)", minWidth: 32 }}>
+                  {Math.round(layer.opacity * 100)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* --- FUSION CONTROLS --- */}
         {irmData && mrsiData && (
@@ -1073,26 +1237,12 @@ const IrmCard = ({
           </div>
         )}
 
-        {/* --- 3D / Spectrum (Bottom) --- */}
+        {/* --- Spectrum (Bottom) --- */}
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: "1rem",
             marginTop: "1rem",
           }}
         >
-          {/* 3D Brain */}
-          <div className="card-panel">
-            <h5 style={{ margin: "0 0 0.5rem 0" }}>3D Brain Preview</h5>
-            <Brain3D
-              irmData={irmData}
-              maskData={maskData}
-              cursor={cursor3D}
-              width={300}
-              height={300}
-            />
-          </div>
 
           {/* Spectrum */}
           <div className="card-panel" style={{ display: "flex", flexDirection: "column" }}>
