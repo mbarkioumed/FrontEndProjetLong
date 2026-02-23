@@ -77,8 +77,8 @@ export default function SpectrumChart({ data }) {
         >
             <canvas
                 ref={canvasRef}
-                width={600}
-                height={150} // Reduced height
+                width={400}
+                height={100}
                 style={{ width: "100%", height: "100%", display: "block" }}
             />
         </div>

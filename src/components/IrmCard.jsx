@@ -837,7 +837,7 @@ const IrmCard = ({
           </div>
         )}
 
-        <div className="viz-grid">
+        <div className="viz-grid viz-grid-compact">
           {/* --- IRM --- */}
           {irmData && (
             <>
@@ -1038,6 +1038,40 @@ const IrmCard = ({
                   className="volume-slider"
                 />
               </div>
+
+              {/* --- Spectrum (inline) --- */}
+              <div className="slice-control spectrum-inline">
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textAlign: "center", marginBottom: 2 }}>
+                  Spectre MRSI
+                </div>
+                {currentSpectrum ? (
+                  <SpectrumChart
+                    data={currentSpectrum}
+                    label={`Voxel (${selectedVoxel?.x}, ${selectedVoxel?.y}, ${selectedVoxel?.z})`}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: "8px",
+                      color: "var(--text-muted)",
+                      fontSize: 11,
+                      textAlign: "center",
+                      padding: "0.5rem",
+                      minHeight: 80,
+                    }}
+                  >
+                    {mrsiData
+                      ? fusionData
+                        ? "Cliquez sur l'IRM fusionnée"
+                        : "Cliquez sur l'IRM"
+                      : "Pas de MRSI"}
+                  </div>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -1236,42 +1270,6 @@ const IrmCard = ({
             </div>
           </div>
         )}
-
-        {/* --- Spectrum (Bottom) --- */}
-        <div
-          style={{
-            marginTop: "1rem",
-          }}
-        >
-
-          {/* Spectrum */}
-          <div className="card-panel" style={{ display: "flex", flexDirection: "column" }}>
-            <h5 style={{ margin: "0 0 0.5rem 0" }}>Spectre MRSI</h5>
-            {currentSpectrum ? (
-              <SpectrumChart
-                data={currentSpectrum}
-                label={`Voxel (${selectedVoxel?.x}, ${selectedVoxel?.y}, ${selectedVoxel?.z})`}
-              />
-            ) : (
-              <div
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderRadius: "8px",
-                  color: "var(--text-muted)",
-                }}
-              >
-                {mrsiData
-                  ? fusionData
-                    ? "Cliquez sur l'IRM fusionnée pour voir le spectre"
-                    : "Cliquez sur l'IRM pour sélectionner un voxel"
-                  : "Pas de MRSI chargé"}
-              </div>
-            )}
-          </div>
-        </div>
 
         {/* --- Upload if missing --- */}
         {!irmData && (
