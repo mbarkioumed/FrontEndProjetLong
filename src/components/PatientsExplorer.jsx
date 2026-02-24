@@ -104,9 +104,19 @@ export default function PatientsExplorer({ onOpenExam }) {
     });
   };
 
+  const [openPatientId, setOpenPatientId] = useState(null);
+  const [searchPatientId, setSearchPatientId] = useState("");
+
   const normalizedPatients = useMemo(
     () => (patientsTree ? normalizeBackendTree(patientsTree) : []),
     [patientsTree],
+  );
+
+  const filteredPatients = normalizedPatients.filter((p) =>
+            p.patientId
+              .toString()
+              .toLowerCase()
+              .includes(searchPatientId.toLowerCase())
   );
 
   // ---------- UI handlers ----------
@@ -453,6 +463,7 @@ const buildMissingPairsFromPredict = (resp) => {
   // ---------- selection counts ----------
   const selectedCount = selectedExamKeys.size;
 
+  
   // ---------- render ----------
   return (
     <div className="card">
@@ -577,33 +588,6 @@ const buildMissingPairsFromPredict = (resp) => {
             Réinitialiser
           </button>
         </div>
-
-        <p
-          style={{
-            marginTop: 10,
-            color: "var(--text-muted)",
-            fontSize: "0.85rem",
-          }}
-        >
-          Debug : le JSON généré est affiché ci-dessous. Tu peux aussi coller un
-          JSON ici si besoin.
-        </p>
-
-        <textarea
-          value={raw}
-          onChange={(e) => setRaw(e.target.value)}
-          placeholder="JSON dataset (debug)"
-          style={{
-            width: "100%",
-            minHeight: 140,
-            fontFamily: "monospace",
-            padding: 10,
-            borderRadius: 10,
-            border: "1px solid var(--border-color)",
-            background: "var(--card-bg)",
-            color: "var(--text-color)",
-          }}
-        />
       </div>
 
       {err && (
@@ -620,6 +604,32 @@ const buildMissingPairsFromPredict = (resp) => {
         </div>
       )}
 
+      {/* Search By PatientId */}
+      <div
+        style={{
+          marginTop: 16,
+          padding: 12,
+          borderRadius: 12,
+          border: "1px solid var(--border-color)",
+          background: "rgba(255,255,255,0.02)",
+        }}
+      >
+        <input
+          type="text"
+          placeholder="🔍 Rechercher par ID patient..."
+          value={searchPatientId}
+          onChange={(e) => setSearchPatientId(e.target.value)}
+          style={{
+            width: "100%",
+            padding: 8,
+            borderRadius: 8,
+            border: "1px solid var(--border-color)",
+            background: "var(--card-bg)",
+            color: "var(--text-color)",
+          }}
+        />
+      </div>
+
       {/* Patients tree */}
       <div style={{ marginTop: 16 }}>
         {!patientsTree && (
@@ -635,143 +645,157 @@ const buildMissingPairsFromPredict = (resp) => {
           </div>
         )}
 
-        {normalizedPatients.map((p) => (
+        
+        {filteredPatients.map((p) => {
+          const isOpen = openPatientId === p.patientId;
+          
+          return (
           <div
             key={p.patientId}
             style={{
               marginTop: 12,
-              padding: 12,
               borderRadius: 12,
               border: "1px solid var(--border-color)",
               background: "var(--card-bg)",
+              overflow: "hidden",
             }}
           >
             <div
+              onClick={() =>
+                setOpenPatientId(isOpen ? null : p.patientId)
+              }
               style={{
+                padding: 12,
                 display: "flex",
                 justifyContent: "space-between",
                 gap: 12,
                 flexWrap: "wrap",
+                cursor: "pointer",
               }}
             >
-              <strong>Patient: {p.patientId}</strong>
+              <strong>{isOpen ? "▼" : "▶"} Patient: {p.patientId}</strong>
               <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
                 {p.analyses.length} examen(s)
               </span>
             </div>
 
-            <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-              {p.analyses.map((ex, idx) => {
-                const key = examKey(p.patientId, ex.date, idx);
-                const checked = selectedExamKeys.has(key);
+            {isOpen && (
+            <div style={{ padding: 12, paddingTop: 0 }}>
+              <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                {p.analyses.map((ex, idx) => {
+                  const key = examKey(p.patientId, ex.date, idx);
+                  const checked = selectedExamKeys.has(key);
 
-                return (
-                  <div
-                    key={`${p.patientId}-${ex.date}-${idx}`}
-                    style={{
-                      padding: 10,
-                      borderRadius: 10,
-                      background: "rgba(255,255,255,0.02)",
-                      border: "1px solid var(--border-color)",
-                    }}
-                  >
+                  return (
                     <div
+                      key={`${p.patientId}-${ex.date}-${idx}`}
                       style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: 10,
-                        flexWrap: "wrap",
-                        alignItems: "center",
+                        padding: 10,
+                        borderRadius: 10,
+                        background: "rgba(255,255,255,0.02)",
+                        border: "1px solid var(--border-color)",
                       }}
                     >
                       <div
                         style={{
                           display: "flex",
+                          justifyContent: "space-between",
                           gap: 10,
-                          alignItems: "center",
                           flexWrap: "wrap",
+                          alignItems: "center",
                         }}
                       >
-                        <label
+                        <div
                           style={{
                             display: "flex",
-                            gap: 8,
+                            gap: 10,
                             alignItems: "center",
-                            cursor: "pointer",
+                            flexWrap: "wrap",
                           }}
                         >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleExam(key)}
-                            disabled={loading || quant.loading}
-                          />
-                          <strong>Date: {ex.date}</strong>
-                        </label>
+                          <label
+                            style={{
+                              display: "flex",
+                              gap: 8,
+                              alignItems: "center",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleExam(key)}
+                              disabled={loading || quant.loading}
+                            />
+                            <strong>Date: {ex.date}</strong>
+                          </label>
 
-                        <div
-                          style={{
-                            color: "var(--text-muted)",
-                            fontSize: "0.85rem",
-                          }}
-                        >
-                          {ex.files.length} fichier(s)
+                          <div
+                            style={{
+                              color: "var(--text-muted)",
+                              fontSize: "0.85rem",
+                            }}
+                          >
+                            {ex.files.length} fichier(s)
+                          </div>
                         </div>
+
+                        <button
+                          className="btn-primary"
+                          onClick={() => handleOpenExam(p.patientId, ex.date, ex)}
+                          disabled={loading || quant.loading}
+                        >
+                          Ouvrir cet examen
+                        </button>
                       </div>
 
-                      <button
-                        className="btn-primary"
-                        onClick={() => handleOpenExam(p.patientId, ex.date, ex)}
-                        disabled={loading || quant.loading}
+                      <div
+                        style={{
+                          marginTop: 8,
+                          fontFamily: "monospace",
+                          fontSize: "0.82rem",
+                        }}
                       >
-                        Ouvrir cet examen
-                      </button>
-                    </div>
+                        {ex.files.map((f, j) => (
+                          <div
+                            key={`${f.relative_path}-${j}`}
+                            style={{ opacity: 0.95 }}
+                          >
+                            • {f.type_analyse || "?"}{" "}
+                            {f.modalites_IRM ? `(mod: ${f.modalites_IRM})` : ""} —{" "}
+                            <span style={{ color: "var(--text-muted)" }}>
+                              {f.relative_path || f.name}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
 
-                    <div
-                      style={{
-                        marginTop: 8,
-                        fontFamily: "monospace",
-                        fontSize: "0.82rem",
-                      }}
-                    >
-                      {ex.files.map((f, j) => (
-                        <div
-                          key={`${f.relative_path}-${j}`}
-                          style={{ opacity: 0.95 }}
-                        >
-                          • {f.type_analyse || "?"}{" "}
-                          {f.modalites_IRM ? `(mod: ${f.modalites_IRM})` : ""} —{" "}
-                          <span style={{ color: "var(--text-muted)" }}>
-                            {f.relative_path || f.name}
-                          </span>
-                        </div>
-                      ))}
+                      {Object.keys(fileMap).length > 0 &&
+                        ex.files.some(
+                          (f) => f.relative_path && !fileMap[f.relative_path],
+                        ) && (
+                          <div
+                            style={{
+                              marginTop: 8,
+                              color: "var(--text-muted)",
+                              fontSize: "0.8rem",
+                            }}
+                          >
+                            ⚠️ Certains chemins renvoyés par le backend ne matchent
+                            pas ceux du navigateur (relative_path). Vérifie que le
+                            backend renvoie bien les mêmes `relativePath` que
+                            `webkitRelativePath`.
+                          </div>
+                        )}
                     </div>
-
-                    {Object.keys(fileMap).length > 0 &&
-                      ex.files.some(
-                        (f) => f.relative_path && !fileMap[f.relative_path],
-                      ) && (
-                        <div
-                          style={{
-                            marginTop: 8,
-                            color: "var(--text-muted)",
-                            fontSize: "0.8rem",
-                          }}
-                        >
-                          ⚠️ Certains chemins renvoyés par le backend ne matchent
-                          pas ceux du navigateur (relative_path). Vérifie que le
-                          backend renvoie bien les mêmes `relativePath` que
-                          `webkitRelativePath`.
-                        </div>
-                      )}
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
+            )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Debug result */}
