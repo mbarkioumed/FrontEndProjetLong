@@ -241,6 +241,22 @@ body {
 
 }
 
+.right-sidebar.collapsed {
+    width: var(--sidebar-collapsed-width);
+}
+
+/* Masquer le titre et le contenu quand collapsed, mais laisser l'emoji et le toggle */
+.right-sidebar.collapsed .sidebar-header h1,
+.right-sidebar.collapsed .nav-links {
+    display: none;
+}
+
+/* Laisser le toggle visible à sa position initiale */
+.right-sidebar.collapsed .sidebar-toggle.right {
+    display: flex; /* s'assurer qu'il reste visible */
+    /* ne changez pas top ni transform pour garder la position */
+}
+
 /* Main Content Area */
 .main-area {
     margin-left: 260px;
@@ -256,16 +272,16 @@ body {
 }
 
 .main-area.sidebar-collapsed {
-    margin-left: 80px;
+    margin-left: var(--sidebar-collapsed-width);
 }
 
 .main-area.right-sidebar-collapsed {
-    margin-right: 0;
+    margin-right: var(--sidebar-collapsed-width);
 }
 
 /* If not collapsed, add margin for right sidebar */
 .main-area:not(.right-sidebar-collapsed) {
-    margin-right: 260px;
+    margin-right: var(--right-sidebar-width);
 }
 
 

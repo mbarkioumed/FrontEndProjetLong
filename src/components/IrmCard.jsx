@@ -127,6 +127,8 @@ const IrmCard = ({
   irmLayers = [],
   onUpdateLayer,
 }) => {
+  const [isOpen, setIsOpen] = useState(true);
+
   //      Focus modal state
   const [focusedView, setFocusedView] = useState(null); // "sagittal" | "coronal" | "axial" | null
 
@@ -627,6 +629,7 @@ const IrmCard = ({
     axDispH,
   } = sliceDims || {};
 
+  
   return (
     <>
       <div
@@ -637,171 +640,36 @@ const IrmCard = ({
         onKeyDown={(e) => {
           if (e.key === "Enter") handleSelectCard();
         }}
-        style={{ cursor: onSelect ? "pointer" : "default" }}
+        style={{ cursor: onSelect ? "pointer" : "default", display: "flex", flexDirection: "column", gap: "1rem" }}
       >
         {/* ===== header ===== */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "1rem",
-            flexWrap: "wrap",
-            marginBottom: "0.75rem",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-              minWidth: 260,
-            }}
-          >
+        {/* Ligne 1 : titre + actions boutons */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span
+                style={{
+                  cursor: "pointer",
+                  fontSize: 14,
+                  marginRight: 8,
+                  userSelect: "none",
+                }}
+                onClick={(e) => {
+                  e.stopPropagation(); // pour pas déclencher le onClick de la card
+                  setIsOpen(!isOpen);
+                }}
+                title={isOpen ? "Réduire" : "Développer"}
+              >
+                {isOpen ? "▼" : "▶"}
+            </span>
+
             <h2 style={{ margin: 0 }}>
               {irmData ? `IRM: ${irmData.nom_fichier}` : ""}
               {irmData && mrsiData ? " | " : ""}
               {mrsiData ? `MRSI: ${mrsiData.nom}` : ""}
             </h2>
-
-            {/*      Versions selectors (IRM / MRSI) */}
-            <div
-              style={{ display: "flex", gap: 10, flexWrap: "wrap" }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {irmData && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    IRM version:
-                  </span>
-                  <select
-                    className="form-select"
-                    style={{
-                      padding: "0.4rem 0.6rem",
-                      borderRadius: 10,
-                      fontSize: 12,
-                      width: 220,
-                    }}
-                    value={currentIrmVersion}
-                    onChange={(e) => onSelectIrmVersion?.(e.target.value)}
-                  >
-                    {(irmHistory?.length
-                      ? irmHistory
-                      : [{ id: "base", label: "Original" }]
-                    ).map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.label || v.id}
-                      </option>
-                    ))}
-                  </select>
-
-                  {currentIrmVersion !== "base" && (
-                    <span
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteVersion?.("IRM", currentIrmVersion);
-                      }}
-                      style={{
-                        cursor: "pointer",
-                        color: "var(--danger)",
-                        fontWeight: "bold",
-                        fontSize: 16,
-                        paddingLeft: 4,
-                      }}
-                      title="Supprimer cette version"
-                    >
-                      X
-                    </span>
-                  )}
-
-                  {irmParamsText && (
-                    <span
-                      style={{
-                        fontSize: 13,
-                        color: "var(--text-muted)",
-                        maxWidth: 400,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                      title={irmParamsText}
-                    >
-                      {irmParamsText}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div
-              style={{ display: "flex", gap: 10, flexWrap: "wrap" }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {mrsiData && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    MRSI version:
-                  </span>
-                  <select
-                    className="form-select"
-                    style={{
-                      padding: "0.4rem 0.6rem",
-                      borderRadius: 10,
-                      fontSize: 12,
-                      width: 220,
-                    }}
-                    value={currentMrsiVersion}
-                    onChange={(e) => onSelectMrsiVersion?.(e.target.value)}
-                  >
-                    {(mrsiHistory?.length
-                      ? mrsiHistory
-                      : [{ id: "base", label: "Original" }]
-                    ).map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.label || v.id}
-                      </option>
-                    ))}
-                  </select>
-
-                  {currentMrsiVersion !== "base" && (
-                    <span
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteVersion?.("MRSI", currentMrsiVersion);
-                      }}
-                      style={{
-                        cursor: "pointer",
-                        color: "var(--danger)",
-                        fontWeight: "bold",
-                        fontSize: 16,
-                        paddingLeft: 4,
-                      }}
-                      title="Supprimer cette version"
-                    >
-                      X
-                    </span>
-                  )}
-
-                  {mrsiParamsText && (
-                    <span
-                      style={{
-                        fontSize: 13,
-                        color: "var(--text-muted)",
-                        maxWidth: 400,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                      title={mrsiParamsText}
-                    >
-                      {mrsiParamsText}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
 
+          {/* Dupliquer / Supprimer */}
           <div style={{ display: "flex", gap: "0.5rem" }}>
             <button
               className="btn-secondary"
@@ -824,6 +692,339 @@ const IrmCard = ({
             </button>
           </div>
         </div>
+
+        {isOpen && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            {/* Ligne 2 : versions à gauche, fusion à droite */}
+            <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+              <div
+                style={{
+                  background: "var(--bg-secondary)",
+                  borderRadius: 8,
+                  padding: "0.5rem 0.75rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.75rem",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+                  flex: "1 1 0", // = 50% de la ligne
+                  minWidth: 0, 
+                }}
+              >
+                {/*      Versions selectors (IRM / MRSI) */}
+                {irmData && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                      IRM version:
+                    </span>
+                    <select
+                      className="form-select"
+                      style={{
+                        padding: "0.4rem 0.6rem",
+                        borderRadius: 10,
+                        fontSize: 12,
+                        width: 220,
+                      }}
+                      value={currentIrmVersion}
+                      onChange={(e) => onSelectIrmVersion?.(e.target.value)}
+                    >
+                      {(irmHistory?.length
+                        ? irmHistory
+                        : [{ id: "base", label: "Original" }]
+                      ).map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.label || v.id}
+                        </option>
+                      ))}
+                    </select>
+
+                    {currentIrmVersion !== "base" && (
+                      <span
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteVersion?.("IRM", currentIrmVersion);
+                        }}
+                        style={{
+                          cursor: "pointer",
+                          color: "var(--danger)",
+                          fontWeight: "bold",
+                          fontSize: 16,
+                          paddingLeft: 4,
+                        }}
+                        title="Supprimer cette version"
+                      >
+                        X
+                      </span>
+                    )}
+
+                    {irmParamsText && (
+                      <span
+                        style={{
+                          fontSize: 13,
+                          color: "var(--text-muted)",
+                          maxWidth: 400,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                        title={irmParamsText}
+                      >
+                        {irmParamsText}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {mrsiData && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                      MRSI version:
+                    </span>
+                    <select
+                      className="form-select"
+                      style={{
+                        padding: "0.4rem 0.6rem",
+                        borderRadius: 10,
+                        fontSize: 12,
+                        width: 220,
+                      }}
+                      value={currentMrsiVersion}
+                      onChange={(e) => onSelectMrsiVersion?.(e.target.value)}
+                    >
+                      {(mrsiHistory?.length
+                        ? mrsiHistory
+                        : [{ id: "base", label: "Original" }]
+                      ).map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.label || v.id}
+                        </option>
+                      ))}
+                    </select>
+
+                    {currentMrsiVersion !== "base" && (
+                      <span
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteVersion?.("MRSI", currentMrsiVersion);
+                        }}
+                        style={{
+                          cursor: "pointer",
+                          color: "var(--danger)",
+                          fontWeight: "bold",
+                          fontSize: 16,
+                          paddingLeft: 4,
+                        }}
+                        title="Supprimer cette version"
+                      >
+                        X
+                      </span>
+                    )}
+
+                    {mrsiParamsText && (
+                      <span
+                        style={{
+                          fontSize: 13,
+                          color: "var(--text-muted)",
+                          maxWidth: 400,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                        title={mrsiParamsText}
+                      >
+                        {mrsiParamsText}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* === Right: Fusion Controls === */}
+              {/* === Right: Fusion Controls as mini-card === */}
+              {irmData && mrsiData && (
+                <div
+                  style={{
+                    background: "var(--bg-secondary)",
+                    borderRadius: 8,
+                    padding: "0.5rem 0.75rem",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.75rem",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+                    flex: "1 1 0",
+                    minWidth: 0,
+                    alignSelf: "flex-start",
+                  }}
+                >
+                  {/* Titre  + bouton*/}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <strong style={{ fontSize: 13, marginBottom: 4 }}>Fusion MRI-MRSI</strong>
+
+                    <button
+                      className="btn-primary"
+                      onClick={handleFusionClick}
+                      disabled={isFusing}
+                      style={{ fontSize: 12, padding: "0.3rem 0.5rem" }}
+                    >
+                      {isFusing ? "Fusion en cours..." : "Générer / Mettre à jour"}
+                    </button>
+                  </div>
+
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.3rem",
+                      fontSize: 12,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={forceCenter}
+                      onChange={(e) => setForceCenter(e.target.checked)}
+                    />
+                    Force Center
+                  </label>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: 12 }}>
+                    <span>Metabolite Index:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="All"
+                      value={fusionChannel}
+                      onChange={(e) => setFusionChannel(e.target.value)}
+                      style={{ width: "60px", padding: "0.2rem", fontSize: 12 }}
+                    />
+                  </div>
+
+                  {fusionData && (
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: 12 }}>
+                      <span>Opacité:</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={fusionOpacity}
+                        onChange={(e) => setFusionOpacity(parseFloat(e.target.value))}
+                        style={{ flex: 1 }}
+                      />
+                      <span>{Math.round(fusionOpacity * 100)}%</span>
+                    </div>
+                  )}
+
+                  {fusionError && (
+                    <div style={{ color: "var(--danger)", fontSize: 11 }}>{fusionError}</div>
+                  )}
+                </div>
+              )}
+            </div>
+            
+            
+            {/* --- LAYER CONTROLS --- */}
+            {hasLayers && onUpdateLayer && (
+              <div
+                style={{
+                  marginTop: "0.75rem",
+                  padding: "0.75rem 1rem",
+                  borderRadius: 12,
+                  border: "1px solid var(--border-color)",
+                  background: "rgba(255,255,255,0.02)",
+                  overflowX: "auto",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
+                  🎨 Couches IRM ({irmLayers.length})
+                </strong>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 12,
+                    alignItems: "center",
+                    flexWrap: "wrap", // s’adapte si la largeur est trop petite
+                  }}
+                >
+                  {irmLayers.map((layer, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,           // moins d’espace entre éléments
+                        opacity: layer.visible ? 1 : 0.4,
+                        padding: "2px 4px",
+                        minWidth: 0,       // permet au flex de réduire la largeur
+                        flex: "1 1 auto",  // chaque couche s’adapte à la largeur dispo
+                      }}
+                    >
+                      {/* Color dot */}
+                      <span
+                        style={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: "50%",
+                          background: layer.color || "#ccc",
+                          border: "1px solid rgba(255,255,255,0.3)",
+                          flexShrink: 0,
+                        }}
+                      />
+
+                      {/* Label */}
+                      <span
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: "var(--text-main)",
+                          whiteSpace: "nowrap",
+                          marginRight: 4,
+                        }}
+                      >
+                        {layer.label}
+                      </span>
+
+                      {/* Visibility toggle */}
+                      <button
+                        type="button"
+                        onClick={() => onUpdateLayer(idx, { visible: !layer.visible })}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: 14,
+                          padding: "0 2px",
+                          marginRight: 4,
+                        }}
+                        title={layer.visible ? "Masquer" : "Afficher"}
+                      >
+                        {layer.visible ? "👁" : "🚫"}
+                      </button>
+
+                      {/* Opacity slider */}
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={Math.round(layer.opacity * 100)}
+                        onChange={(e) =>
+                          onUpdateLayer(idx, { opacity: parseInt(e.target.value, 10) / 100 })
+                        }
+                        style={{ flex: 1, minWidth: 60 }}
+                        title={`Opacité: ${Math.round(layer.opacity * 100)}%`}
+                      />
+
+                      {/* Pourcentage */}
+                      <span style={{ fontSize: 11, color: "var(--text-muted)", minWidth: 28, textAlign: "right" }}>
+                        {Math.round(layer.opacity * 100)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+           </div>
+        )}
 
         {/* per-card job status */}
         {job?.error && (
@@ -1076,200 +1277,9 @@ const IrmCard = ({
           )}
         </div>
 
-        {/* --- LAYER CONTROLS --- */}
-        {hasLayers && onUpdateLayer && (
-          <div
-            style={{
-              marginTop: "0.75rem",
-              padding: "0.75rem 1rem",
-              borderRadius: 12,
-              border: "1px solid var(--border-color)",
-              background: "rgba(255,255,255,0.02)",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 8,
-              }}
-            >
-              <strong style={{ fontSize: 13 }}>🎨 Couches IRM ({irmLayers.length})</strong>
-            </div>
+ 
 
-            {irmLayers.map((layer, idx) => (
-              <div
-                key={idx}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "4px 0",
-                  opacity: layer.visible ? 1 : 0.4,
-                }}
-              >
-                {/* Color dot */}
-                <span
-                  style={{
-                    width: 12,
-                    height: 12,
-                    borderRadius: "50%",
-                    background: layer.color || "#ccc",
-                    border: "1px solid rgba(255,255,255,0.3)",
-                    flexShrink: 0,
-                  }}
-                />
 
-                {/* Label */}
-                <span
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    minWidth: 50,
-                    color: "var(--text-color)",
-                  }}
-                >
-                  {layer.label}
-                </span>
-
-                {/* Visibility toggle */}
-                <button
-                  type="button"
-                  onClick={() => onUpdateLayer(idx, { visible: !layer.visible })}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: 14,
-                    padding: "2px 4px",
-                  }}
-                  title={layer.visible ? "Masquer" : "Afficher"}
-                >
-                  {layer.visible ? "👁" : "🚫"}
-                </button>
-
-                {/* Opacity slider */}
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={Math.round(layer.opacity * 100)}
-                  onChange={(e) =>
-                    onUpdateLayer(idx, {
-                      opacity: parseInt(e.target.value, 10) / 100,
-                    })
-                  }
-                  style={{ flex: 1, minWidth: 80 }}
-                  title={`Opacité: ${Math.round(layer.opacity * 100)}%`}
-                />
-
-                <span style={{ fontSize: 11, color: "var(--text-muted)", minWidth: 32 }}>
-                  {Math.round(layer.opacity * 100)}%
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* --- FUSION CONTROLS --- */}
-        {irmData && mrsiData && (
-          <div
-            style={{
-              marginTop: "1rem",
-              padding: "1rem",
-              background: "var(--bg-secondary)",
-              borderRadius: "8px",
-            }}
-          >
-            <h4>Fusion MRI-MRSI</h4>
-            {fusionError && (
-              <div
-                style={{
-                  color: "red",
-                  fontSize: "0.8rem",
-                  marginBottom: "0.5rem",
-                }}
-              >
-                {fusionError}
-              </div>
-            )}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "1rem",
-                flexWrap: "wrap",
-              }}
-            >
-              <button
-                className="btn-primary"
-                onClick={handleFusionClick}
-                disabled={isFusing}
-              >
-                {isFusing ? "Fusion en cours..." : "Générer / Mettre à jour la Fusion"}
-              </button>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "2rem",
-                  flexWrap: "wrap",
-                }}
-              >
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.5rem",
-                    cursor: "pointer",
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={forceCenter}
-                    onChange={(e) => setForceCenter(e.target.checked)}
-                  />
-                  <span>Force Center</span>
-                </label>
-
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                  <span>Metabolite Index:</span>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="All (Sum)"
-                    value={fusionChannel}
-                    onChange={(e) => setFusionChannel(e.target.value)}
-                    style={{ width: "80px", padding: "0.2rem" }}
-                  />
-                </div>
-
-                {fusionData && (
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    <span>Opacité:</span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={fusionOpacity}
-                      onChange={(e) => setFusionOpacity(parseFloat(e.target.value))}
-                    />
-                    <span>{Math.round(fusionOpacity * 100)}%</span>
-                  </div>
-                )}
-
-                {fusionData && (
-                  <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                    {fusionData.info}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* --- Upload if missing --- */}
         {!irmData && (
