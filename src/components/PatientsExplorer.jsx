@@ -7,6 +7,36 @@ import { api } from "../api/client";
  * Props:
  *  - onOpenExam: ({ irmFiles: File[], mrsiFile: File|null, maskFile: File|null, meta: {...} }) => Promise<void>
  */
+
+const LOG_PREFIX = "[PatientsExplorer]";
+
+const now = () => new Date().toLocaleTimeString();
+
+const toOneLine = (x) => {
+  try {
+    if (x == null) return "";
+    if (typeof x === "string") return x;
+    return JSON.stringify(x);
+  } catch {
+    return String(x);
+  }
+};
+
+const log = (label, data) => {
+  if (data !== undefined) console.log(`${LOG_PREFIX} ${now()} ${label}`, data);
+  else console.log(`${LOG_PREFIX} ${now()} ${label}`);
+};
+
+const warn = (label, data) => {
+  if (data !== undefined) console.warn(`${LOG_PREFIX} ${now()} ${label}`, data);
+  else console.warn(`${LOG_PREFIX} ${now()} ${label}`);
+};
+
+const errorLog = (label, data) => {
+  if (data !== undefined) console.error(`${LOG_PREFIX} ${now()} ${label}`, data);
+  else console.error(`${LOG_PREFIX} ${now()} ${label}`);
+};
+
 export default function PatientsExplorer({ onOpenExam }) {
   const { token } = useContext(AuthContext);
 
@@ -18,7 +48,7 @@ export default function PatientsExplorer({ onOpenExam }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
-  //    Quantification UI state
+  // Quantification UI state
   const [selectedExamKeys, setSelectedExamKeys] = useState(() => new Set());
   const [treatmentName, setTreatmentName] = useState("predict1");
   const [quant, setQuant] = useState({
@@ -135,6 +165,12 @@ export default function PatientsExplorer({ onOpenExam }) {
     // reset selection quantif
     setSelectedExamKeys(new Set());
     setQuant({ loading: false, error: "", result: null, info: "" });
+
+    log("Folder picked", {
+      rootFolder: dataset.rootFolder,
+      niftiCount: dataset.files.length,
+      fileMapKeys: Object.keys(map).length,
+    });
   };
 
   const handleSendDataset = async () => {
@@ -145,12 +181,22 @@ export default function PatientsExplorer({ onOpenExam }) {
       if (!payload && raw?.trim()) payload = JSON.parse(raw);
       if (!payload) throw new Error("Aucun dataset JSON disponible.");
 
+      log("upload-json-dataset start", {
+        rootFolder: payload.rootFolder,
+        files: payload.files?.length,
+      });
+
       const data = await api.uploadJsonDataset(payload, token);
       setPatientsTree(data);
+
+      log("upload-json-dataset OK", {
+        keys: Object.keys(data || {}).slice(0, 12),
+      });
 
       setSelectedExamKeys(new Set());
       setQuant({ loading: false, error: "", result: null, info: "" });
     } catch (e) {
+      errorLog("upload-json-dataset error", e?.message || e);
       setErr(e.message || "Erreur inconnue");
     } finally {
       setLoading(false);
@@ -170,7 +216,8 @@ export default function PatientsExplorer({ onOpenExam }) {
       const fileObj = fileMap[rel];
       if (!fileObj) continue;
 
-      if (type.includes("IRM")) irm.push({ file: fileObj, modality: f.modalites_IRM || "IRM" });
+      if (type.includes("IRM"))
+        irm.push({ file: fileObj, modality: f.modalites_IRM || "IRM" });
       else if (type.includes("MRSI")) mrsi = fileObj;
       else if (type.includes("MASK")) mask = fileObj;
     }
@@ -201,6 +248,12 @@ export default function PatientsExplorer({ onOpenExam }) {
       }
     }
 
+    log("pickExamFiles", {
+      irmCount: irm.length,
+      mrsi: mrsi?.name || null,
+      mask: mask?.name || null,
+    });
+
     return { irmFiles: irm, mrsiFile: mrsi, maskFile: mask };
   };
 
@@ -225,6 +278,14 @@ export default function PatientsExplorer({ onOpenExam }) {
       );
       return;
     }
+
+    log("Open exam", {
+      patientId,
+      date,
+      irmCount: irmFiles.length,
+      hasMrsi: !!mrsiFile,
+      hasMask: !!maskFile,
+    });
 
     await onOpenExam({
       irmFiles,
@@ -286,6 +347,12 @@ export default function PatientsExplorer({ onOpenExam }) {
       fichiers: r.fichiers,
     }));
 
+    log("/predict request", {
+      exams: payload.length,
+      treatmentName: payload[0]?.type_traitement,
+      sample: payload[0]?.fichiers?.slice?.(0, 4),
+    });
+
     const res = await fetch(`${BASE_URL}/predict`, {
       method: "POST",
       headers: {
@@ -296,6 +363,13 @@ export default function PatientsExplorer({ onOpenExam }) {
     });
 
     const json = await res.json().catch(() => ({}));
+
+    log("/predict response", {
+      ok: res.ok,
+      status: res.status,
+      sample: Array.isArray(json) ? json[0] : json,
+    });
+
     if (!res.ok) {
       const msg = json?.detail || json?.error || `HTTP ${res.status}`;
       throw new Error(msg);
@@ -303,31 +377,6 @@ export default function PatientsExplorer({ onOpenExam }) {
     return json;
   };
 
-const callUploadMemoire = async (pairs) => {
-  // pairs = [{ type:"IRM"|"MRSI"|"MASK", name:"bin_test_data/..." }]
-
-  //  envoyer dicts (plus compatible avec .get())
-  const payload = pairs.map((p) => ({
-    type: p.type,
-    path: p.name,
-  }));
-
-  const res = await fetch(`${BASE_URL}/storage/upload_memoire`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(),
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg = json?.detail || json?.error || `HTTP ${res.status}`;
-    throw new Error(msg);
-  }
-  return json;
-};
   const stripLeadingDataset = (path) => {
     const p = normalizeRelPath(path);
     const candidates = [
@@ -370,6 +419,14 @@ const callUploadMemoire = async (pairs) => {
           .trim() === "ok",
     );
   };
+const extractBackendErrors = (resp) => {
+  const items = Array.isArray(resp) ? resp : [resp];
+  return items
+    .map((it) => it && typeof it === "object" ? it.error : null)
+    .filter(Boolean);
+};
+
+const hasAnyError = (resp) => extractBackendErrors(resp).length > 0;
 
   const collectAllMissing = (resp) => {
     const items = normalizePredictItems(resp);
@@ -378,7 +435,10 @@ const callUploadMemoire = async (pairs) => {
       const status = String(it?.Fichiers_memoire || it?.fichiers_memoire || "")
         .toLowerCase()
         .trim();
-      const miss = it?.fichiers_manquants || it?.Fichiers_manquants || it?.missing_files;
+      const miss =
+        it?.fichiers_manquants ||
+        it?.Fichiers_manquants ||
+        it?.missing_files;
       if (status.includes("manquants") && Array.isArray(miss)) {
         all.push(...miss);
       }
@@ -386,18 +446,121 @@ const callUploadMemoire = async (pairs) => {
     return [...new Set(all)];
   };
 
-const buildMissingPairsFromPredict = (resp) => {
-  const missing = collectAllMissing(resp);
-  return {
-    pairs: missing.map((missingPath) => ({
-      type: classifyTypeFromPath(missingPath),
-      name: normalizeRelPath(missingPath),
-    })),
-    missingCount: missing.length,
+  const buildMissingPairsFromPredict = (resp) => {
+    const missing = collectAllMissing(resp);
+    return {
+      pairs: missing.map((missingPath) => ({
+        type: classifyTypeFromPath(missingPath),
+        name: normalizeRelPath(missingPath),
+      })),
+      missingCount: missing.length,
+    };
   };
+
+  // Upload missing files using /upload-irm and /upload-mrsi (multipart/form-data)
+  const uploadMissingFile = async ({ type, missingPath }) => {
+    const normMissing = normalizeRelPath(missingPath);
+    const hit = findFileInMap(normMissing);
+
+    log("missing resolve", {
+      missing: normMissing,
+      detectedType: type,
+      found: !!hit?.file,
+      matchedKey: hit?.key || null,
+    });
+
+    if (!hit?.file) {
+      const tried = stripLeadingDataset(normMissing);
+      errorLog("missing not found in fileMap", { missing: normMissing, tried });
+      throw new Error(`Fichier introuvable sur disque pour: ${normMissing}`);
+    }
+
+    const t = String(type || "").toUpperCase();
+    const isMrsi = t.includes("MRSI");
+    const endpoint = isMrsi ? "/upload-mrsi/" : "/upload-irm/"; // MASK treated as IRM
+
+    const form = new FormData();
+
+    // Important: force filename = missingPath so backend storage key matches /predict list
+    form.append("fichier", hit.file, normMissing);
+
+    log("upload missing start", {
+      endpoint,
+      filenameSent: normMissing,
+      localName: hit.file.name,
+      size: hit.file.size,
+    });
+
+    const res = await fetch(`${BASE_URL}${endpoint}`, {
+      method: "POST",
+      headers: {
+        ...authHeaders(),
+        // Do not set Content-Type for FormData
+      },
+      body: form,
+    });
+
+    const json = await res.json().catch(() => ({}));
+
+    log("upload missing response", {
+      endpoint,
+      ok: res.ok,
+      status: res.status,
+      sample: json?.error ? { error: json.error } : "ok",
+    });
+
+    if (!res.ok || json?.error) {
+      const msg = json?.detail || json?.error || `HTTP ${res.status}`;
+      throw new Error(`Upload échoué (${endpoint}) pour ${normMissing}: ${msg}`);
+    }
+
+    return json;
+  };
+
+const uploadMissingFilesBatch = async (pairs, concurrency = 3) => {
+  const queue = pairs.slice();
+  const doneRef = { value: 0 };
+  const errors = [];
+
+  log("upload batch start", { total: pairs.length, concurrency });
+
+  const worker = async (wid) => {
+    for (;;) {
+      const item = queue.shift();
+      if (!item) return;
+
+      try {
+        log(`worker#${wid} upload`, item);
+        await uploadMissingFile({ type: item.type, missingPath: item.name });
+        doneRef.value += 1;
+        setQuant((q) => ({
+          ...q,
+          info: `Upload manquants: ${doneRef.value}/${pairs.length}`,
+        }));
+      } catch (e) {
+        const msg = e?.message || String(e);
+        errors.push({ item, error: msg });
+        errorLog(`worker#${wid} upload failed`, { item, error: msg });
+        // on continue, on ne throw pas
+      }
+    }
+  };
+
+  const workers = Array.from({ length: concurrency }, (_, i) => worker(i + 1));
+  await Promise.all(workers);
+
+  log("upload batch done", { total: pairs.length, failed: errors.length });
+
+  if (errors.length) {
+    throw new Error(
+      `Upload manquants incomplet: ${errors.length} échec(s). Exemple: ${errors[0].error}`,
+    );
+  }
 };
+
   const handleQuantifySelected = async () => {
     setQuant({ loading: true, error: "", result: null, info: "" });
+
     try {
       if (!Object.keys(fileMap).length) {
         throw new Error(
@@ -408,11 +571,28 @@ const buildMissingPairsFromPredict = (resp) => {
       const selectedRequests = buildSelectedExamRequests();
       if (!selectedRequests.length) throw new Error("Aucun examen sélectionné.");
 
+      log("Quantification start", {
+        selectedExams: selectedRequests.length,
+        treatmentName,
+      });
+
       setQuant((q) => ({ ...q, info: "Appel /predict..." }));
       const r1 = await callPredict(selectedRequests);
+if (hasAnyError(r1)) {
+  const errors = extractBackendErrors(r1);
+  errorLog("/predict returned backend error(s)", errors);
+  setQuant({
+    loading: false,
+    error: `Erreur backend dans /predict: ${errors[0]}`,
+    result: r1,
+    info: "",
+  });
+  return;
+}
 
       if (isAllOk(r1)) {
-        setQuant({ loading: false, error: "", result: r1, info: "OK   " });
+        log("/predict OK (no missing)", r1);
+        setQuant({ loading: false, error: "", result: r1, info: "OK" });
         return;
       }
 
@@ -420,20 +600,56 @@ const buildMissingPairsFromPredict = (resp) => {
       if (missing.length > 0) {
         const { pairs, missingCount } = buildMissingPairsFromPredict(r1);
 
+        warn("/predict missing files", {
+          missingCount,
+          sample: pairs.slice(0, 6),
+        });
+
+        // precheck: detect those we cannot map locally
+        const notFound = pairs
+          .filter((p) => !findFileInMap(p.name))
+          .map((p) => p.name);
+
+        if (notFound.length) {
+          warn("Some missing paths cannot be resolved locally", {
+            count: notFound.length,
+            sample: notFound.slice(0, 10),
+          });
+        }
+
         setQuant((q) => ({
           ...q,
-          info: `Fichiers manquants: ${missingCount}. Upload...`,
+          info: `Fichiers manquants: ${missingCount}. Upload en cours...`,
         }));
 
-        await callUploadMemoire(pairs);
+        await uploadMissingFilesBatch(pairs, 3);
 
         setQuant((q) => ({ ...q, info: "Re-appel /predict..." }));
         const r2 = await callPredict(selectedRequests);
 
-        setQuant({ loading: false, error: "", result: r2, info: "Terminé   " });
+        if (hasAnyError(r2)) {
+  const errors = extractBackendErrors(r2);
+  errorLog("/predict returned backend error(s) after upload", errors);
+  setQuant({
+    loading: false,
+    error: `Erreur backend dans /predict après upload: ${errors[0]}`,
+    result: r2,
+    info: "",
+  });
+  return;
+}
+        log("Quantification done", r2);
+
+        setQuant({
+          loading: false,
+          error: "",
+          result: r2,
+          info: "Terminé",
+        });
         return;
       }
 
+      warn("/predict unexpected response", r1);
       setQuant({
         loading: false,
         error: "Réponse /predict inattendue (ni OK ni manquants).",
@@ -441,6 +657,7 @@ const buildMissingPairsFromPredict = (resp) => {
         info: "",
       });
     } catch (e) {
+      errorLog("Quantification error", e?.message || e);
       setQuant({
         loading: false,
         error: e.message || String(e),
@@ -456,9 +673,8 @@ const buildMissingPairsFromPredict = (resp) => {
   // ---------- render ----------
   return (
     <div className="card">
-      <h2>👤 Patients</h2>
+      <h2>Patients</h2>
 
-      {/*    Quantification bar */}
       <div
         style={{
           marginTop: "0.75rem",
@@ -532,7 +748,7 @@ const buildMissingPairsFromPredict = (resp) => {
           )}
           {quant.result && !quant.error && (
             <div style={{ color: "var(--success)", fontSize: "0.9rem" }}>
-                 Résultat reçu
+              Résultat reçu
             </div>
           )}
         </div>
@@ -571,6 +787,7 @@ const buildMissingPairsFromPredict = (resp) => {
               setErr("");
               setSelectedExamKeys(new Set());
               setQuant({ loading: false, error: "", result: null, info: "" });
+              log("Reset");
             }}
             disabled={loading || quant.loading}
           >
@@ -620,7 +837,6 @@ const buildMissingPairsFromPredict = (resp) => {
         </div>
       )}
 
-      {/* Patients tree */}
       <div style={{ marginTop: 16 }}>
         {!patientsTree && (
           <div style={{ color: "var(--text-muted)" }}>
@@ -760,7 +976,7 @@ const buildMissingPairsFromPredict = (resp) => {
                             fontSize: "0.8rem",
                           }}
                         >
-                          ⚠️ Certains chemins renvoyés par le backend ne matchent
+                          Certains chemins renvoyés par le backend ne matchent
                           pas ceux du navigateur (relative_path). Vérifie que le
                           backend renvoie bien les mêmes `relativePath` que
                           `webkitRelativePath`.
@@ -774,10 +990,9 @@ const buildMissingPairsFromPredict = (resp) => {
         ))}
       </div>
 
-      {/* Debug result */}
       {quant.result && (
         <div style={{ marginTop: 16 }}>
-          <h3 style={{ marginBottom: 8 }}>📦 Résultat /predict</h3>
+          <h3 style={{ marginBottom: 8 }}>Résultat /predict</h3>
           <pre
             style={{
               padding: 12,
