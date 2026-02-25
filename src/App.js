@@ -9,7 +9,9 @@ import IrmCard from "./components/IrmCard";
 
 import { storeData } from "./utils/dataCache";
 
-const worker = new Worker(new URL("./dataProcessor.worker.js", import.meta.url));
+const worker = new Worker(
+  new URL("./dataProcessor.worker.js", import.meta.url),
+);
 
 const workerService = {
   requestId: 0,
@@ -391,7 +393,6 @@ function App() {
 
         setIrmResults(tagged);
 
-
         setIrmCards((prev) =>
           prev.map((c) => {
             // target card: either provided or first empty IRM
@@ -523,11 +524,11 @@ function App() {
   // Layer color defaults per modality
   // ===============================
   const LAYER_COLORS = {
-    T1: null,           // grayscale (base)
-    T1C: "#ff6b6b",     // red
-    T2: "#4ecdc4",      // teal
-    Flair: "#ffe66d",   // yellow
-    IRM: "#a29bfe",     // purple (fallback)
+    T1: null, // grayscale (base)
+    T1C: "#ff6b6b", // red
+    T2: "#4ecdc4", // teal
+    Flair: "#ffe66d", // yellow
+    IRM: "#a29bfe", // purple (fallback)
   };
 
   // ===============================
@@ -554,8 +555,7 @@ function App() {
 
     try {
       // irmFiles is now [{file, modality}, ...]
-      const safeIrmFiles =
-        irmFiles && irmFiles.length ? irmFiles : [];
+      const safeIrmFiles = irmFiles && irmFiles.length ? irmFiles : [];
 
       // Create a fresh card that becomes active
       const baseCardId = Date.now();
@@ -589,8 +589,7 @@ function App() {
             headers: { Authorization: `Bearer ${token}` },
             body: formData,
           });
-          if (!response.ok)
-            throw new Error(`Erreur upload IRM (${modality})`);
+          if (!response.ok) throw new Error(`Erreur upload IRM (${modality})`);
 
           const blob = await response.blob();
           const blobUrl = URL.createObjectURL(blob);
@@ -623,15 +622,13 @@ function App() {
           color:
             i === 0
               ? null
-              : LAYER_COLORS[tagged.__modality] ||
-                LAYER_COLORS.IRM,
+              : LAYER_COLORS[tagged.__modality] || LAYER_COLORS.IRM,
           visible: true,
         }));
 
         // First layer is also the irmData for backward compat
         const baseTagged = results[0];
         setIrmResults(baseTagged);
-
 
         setIrmCards((prev) =>
           prev.map((c) =>
@@ -766,9 +763,12 @@ function App() {
   const fetchSpectrum = async (name, x, y, z) => {
     if (x == null || y == null || z == null) return null;
     try {
-      const res = await fetch(`${API_URL}/spectrum/${encodeURIComponent(name)}/${x}/${y}/${z}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(
+        `${API_URL}/spectrum/${encodeURIComponent(name)}/${x}/${y}/${z}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
       if (!res.ok) throw new Error("Erreur affichage spectre");
       return await res.json();
     } catch (err) {
@@ -794,7 +794,9 @@ function App() {
 
     try {
       const key =
-        dataInstance.__backendKey || dataInstance.nom_fichier || dataInstance.nom;
+        dataInstance.__backendKey ||
+        dataInstance.nom_fichier ||
+        dataInstance.nom;
 
       // Keep only params defined by selected traitement
       const paramDefs = catalog[typeTraitement]?.params || {};
@@ -866,7 +868,12 @@ function App() {
       const instance =
         dt === "IRM" ? card.irmData : dt === "MRSI" ? card.mrsiData : null;
       if (!instance) return;
-      return runTraitement(instance, card.id, selectedTraitement, traitementParams);
+      return runTraitement(
+        instance,
+        card.id,
+        selectedTraitement,
+        traitementParams,
+      );
     });
 
     await Promise.allSettled(tasks);
@@ -875,21 +882,183 @@ function App() {
   // ===============================
   // UI Pieces
   // ===============================
+  // Remplace renderHome() par cette version
   const renderHome = () => (
-    <div className="card">
-      <h2>Bienvenue sur Plateforme Cancer</h2>
-      <p>
-        Cette application permet de visualiser et d'analyser des données médicales IRM et
-        MRSI.
-      </p>
-      <div className="info-grid" style={{ marginTop: "2rem" }}>
-        <div className="info-card">
-          <h3>🧠 IRM</h3>
-          <p>Visualisation de coupes sagittales, coronales et axiales.</p>
+    <div className="home">
+      {/* HERO */}
+      <div className="home-hero card">
+        <div className="home-hero-left">
+          <div className="home-kicker">
+            <span className="pill">🏥 Plateforme Cancer</span>
+            <span className={`pill ${backendStatus ? "pill-ok" : "pill-bad"}`}>
+              {backendStatus ? "✅ Backend connecté" : "⚠️ Backend hors ligne"}
+            </span>
+          </div>
+
+          <h2 className="home-title">
+            Visualisez, fusionnez et analysez vos examens{" "}
+            <span className="accent">IRM</span> &{" "}
+            <span className="accent">MRSI</span>
+          </h2>
+
+          <p className="home-subtitle">
+            Une interface pensée pour explorer les volumes 3D, inspecter les
+            voxels spectroscopiques, puis lancer des post-traitements
+            (filtrages, métabolites…) et comparer des examens.
+          </p>
+
+          <div className="home-actions">
+            <button
+              className="btn btn-primary"
+              onClick={() => setView("irm")}
+              disabled={!backendStatus}
+              title={
+                !backendStatus
+                  ? "Backend hors ligne"
+                  : "Aller à Upload IRM/MRSI"
+              }
+            >
+              🧠 Démarrer une analyse
+            </button>
+
+            <button
+              className="btn btn-secondary"
+              onClick={() => setView("patients")}
+            >
+              👤 Explorer les patients
+            </button>
+          </div>
+
+          {!backendStatus && (
+            <div className="home-alert">
+              Le backend est hors ligne : démarre FastAPI puis reviens ici pour
+              analyser des fichiers.
+            </div>
+          )}
         </div>
-        <div className="info-card">
+
+        {/* RIGHT SIDE: mini workflow */}
+        <div className="home-hero-right">
+          <div className="workflow">
+            <div className="workflow-step">
+              <div className="step-badge">1</div>
+              <div>
+                <div className="step-title">Importer</div>
+                <div className="step-desc">
+                  IRM (.nii/.nii.gz) + MRSI + masque/labels si dispo
+                </div>
+              </div>
+            </div>
+            <div className="workflow-step">
+              <div className="step-badge">2</div>
+              <div>
+                <div className="step-title">Explorer</div>
+                <div className="step-desc">
+                  Multi-plans, sliders, voxels cliquables & spectre
+                </div>
+              </div>
+            </div>
+            <div className="workflow-step">
+              <div className="step-badge">3</div>
+              <div>
+                <div className="step-title">Post-traiter</div>
+                <div className="step-desc">
+                  Catalogue, paramètres dynamiques, comparaison
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* FEATURES */}
+      <div className="home-grid">
+        <div className="home-card card">
+          <h3>🧠 IRM</h3>
+          <p>
+            Visualisation sagittal / coronal / axial, navigation fluide par
+            tranches.
+          </p>
+          <ul className="home-list">
+            <li>Sliders par plan</li>
+            <li>Comparaison (cards)</li>
+            <li>Overlay multi-modalités (à finaliser)</li>
+          </ul>
+          <button className="link-btn" onClick={() => setView("irm")}>
+            Ouvrir Upload IRM →
+          </button>
+        </div>
+
+        <div className="home-card card">
           <h3>📊 MRSI</h3>
-          <p>Analyse spectrographique et cartes de voxels.</p>
+          <p>
+            Grille de voxels interactive + visualisation du spectre associé.
+          </p>
+          <ul className="home-list">
+            <li>Sélection voxel</li>
+            <li>Carte d’intensité</li>
+            <li>Spectre (Canvas)</li>
+          </ul>
+          <button className="link-btn" onClick={() => setView("irm")}>
+            Charger MRSI →
+          </button>
+        </div>
+
+        <div className="home-card card">
+          <h3>⚙️ Post-traitements</h3>
+          <p>
+            Catalogue de traitements (FFT, filtres, métabolites…) + paramètres
+            dynamiques.
+          </p>
+          <ul className="home-list">
+            <li>Configuration auto depuis JSON</li>
+            <li>Exécution par card</li>
+            <li>Résultats (à enrichir + sauvegarde)</li>
+          </ul>
+          <button className="link-btn" onClick={() => setView("irm")}>
+            Accéder au catalogue →
+          </button>
+        </div>
+
+        <div className="home-card card">
+          <h3>👤 Patients</h3>
+          <p>
+            Organisation par patient et date (timeline) pour suivi longitudinal.
+          </p>
+          <ul className="home-list">
+            <li>Arborescence patient → examens</li>
+            <li>Ouverture rapide d’un examen</li>
+            <li>Comparaison d’états</li>
+          </ul>
+          <button className="link-btn" onClick={() => setView("patients")}>
+            Ouvrir Patients →
+          </button>
+        </div>
+      </div>
+
+      {/* TIPS */}
+      <div className="home-footer card">
+        <h3>Conseils rapides</h3>
+        <div className="tips">
+          <div className="tip">
+            <div className="tip-title">Formats</div>
+            <div className="tip-desc">
+              Utilise .nii / .nii.gz (et masque/labels si disponibles).
+            </div>
+          </div>
+          <div className="tip">
+            <div className="tip-title">Comparaison</div>
+            <div className="tip-desc">
+              Crée 2 cards pour comparer deux examens ou deux traitements.
+            </div>
+          </div>
+          <div className="tip">
+            <div className="tip-title">Performance</div>
+            <div className="tip-desc">
+              Les traitements lourds peuvent prendre du temps : préfère des
+              tests légers d’abord.
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -903,11 +1072,18 @@ function App() {
           <label>Fichier NIfTI (.nii, .nii.gz)</label>
           <input type="file" name="fichier" accept=".nii,.gz" required />
         </div>
-        <button type="submit" className="btn-primary" disabled={loading || !backendStatus}>
+        <button
+          type="submit"
+          className="btn-primary"
+          disabled={loading || !backendStatus}
+        >
           {loading ? "Traitement..." : `Analyser ${type}`}
         </button>
         {!backendStatus && (
-          <p className="status-error" style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}>
+          <p
+            className="status-error"
+            style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}
+          >
             Backend hors ligne
           </p>
         )}
@@ -922,19 +1098,27 @@ function App() {
 
   const canRunActive =
     !!activeCard &&
-    ((traitementParams.dataType === "IRM" && !!activeCard?.irmData?.nom_fichier) ||
+    ((traitementParams.dataType === "IRM" &&
+      !!activeCard?.irmData?.nom_fichier) ||
       (traitementParams.dataType === "MRSI" && !!activeCard?.mrsiData?.nom)) &&
     !activeJob?.loading;
 
   const canRunAll =
     irmCards.some((c) =>
-      traitementParams.dataType === "IRM" ? !!c.irmData?.nom_fichier : !!c.mrsiData?.nom,
+      traitementParams.dataType === "IRM"
+        ? !!c.irmData?.nom_fichier
+        : !!c.mrsiData?.nom,
     ) && !loading;
 
   //     Contextual right sidebar header/title
   const rightSidebarTitle =
-    view === "irm" ? "Post-Traitement" : view === "patients" ? "Patients • Aide" : "Outils";
-  const rightSidebarEmoji = view === "irm" ? "⚙️" : view === "patients" ? "🧩" : "🧰";
+    view === "irm"
+      ? "Post-Traitement"
+      : view === "patients"
+        ? "Patients • Aide"
+        : "Outils";
+  const rightSidebarEmoji =
+    view === "irm" ? "⚙️" : view === "patients" ? "🧩" : "🧰";
 
   return (
     <div className="App">
@@ -994,7 +1178,9 @@ function App() {
       >
         <div className="top-bar">
           <div className="status-indicator">
-            <div className={`dot ${backendStatus ? "connected" : "disconnected"}`}></div>
+            <div
+              className={`dot ${backendStatus ? "connected" : "disconnected"}`}
+            ></div>
             <span>Backend {backendStatus ? "Connecté" : "Déconnecté"}</span>
           </div>
           <div className="user-info" style={{ display: "flex", gap: 12 }}>
@@ -1040,33 +1226,49 @@ function App() {
                 maskData={card.maskData}
                 irmLayers={card.irmLayers || []}
                 onUpdateLayer={(idx, patch) => updateLayer(card.id, idx, patch)}
-                onSelectIrmVersion={(versionId) => selectIrmVersion(card.id, versionId)}
-                onSelectMrsiVersion={(versionId) => selectMrsiVersion(card.id, versionId)}
+                onSelectIrmVersion={(versionId) =>
+                  selectIrmVersion(card.id, versionId)
+                }
+                onSelectMrsiVersion={(versionId) =>
+                  selectMrsiVersion(card.id, versionId)
+                }
                 onDeleteVersion={(type, versionId) => {
                   setIrmCards((prev) =>
                     prev.map((c) => {
                       if (c.id !== card.id) return c;
 
                       if (type === "IRM") {
-                        const nextHistory = (c.irmHistory || []).filter((v) => v.id !== versionId);
+                        const nextHistory = (c.irmHistory || []).filter(
+                          (v) => v.id !== versionId,
+                        );
                         const nextData =
                           c.irmData?.__versionId === versionId
                             ? nextHistory.length
                               ? nextHistory[nextHistory.length - 1].data
                               : null
                             : c.irmData;
-                        return { ...c, irmHistory: nextHistory, irmData: nextData };
+                        return {
+                          ...c,
+                          irmHistory: nextHistory,
+                          irmData: nextData,
+                        };
                       }
 
                       if (type === "MRSI") {
-                        const nextHistory = (c.mrsiHistory || []).filter((v) => v.id !== versionId);
+                        const nextHistory = (c.mrsiHistory || []).filter(
+                          (v) => v.id !== versionId,
+                        );
                         const nextData =
                           c.mrsiData?.__versionId === versionId
                             ? nextHistory.length
                               ? nextHistory[nextHistory.length - 1].data
                               : null
                             : c.mrsiData;
-                        return { ...c, mrsiHistory: nextHistory, mrsiData: nextData };
+                        return {
+                          ...c,
+                          mrsiHistory: nextHistory,
+                          mrsiData: nextData,
+                        };
                       }
 
                       return c;
@@ -1085,7 +1287,10 @@ function App() {
                       irmData: card.irmData ? { ...card.irmData } : null,
                       mrsiData: card.mrsiData ? { ...card.mrsiData } : null,
                       maskData: card.maskData ? { ...card.maskData } : null,
-                      irmHistory: (card.irmHistory || []).map((v) => ({ ...v, data: { ...v.data } })),
+                      irmHistory: (card.irmHistory || []).map((v) => ({
+                        ...v,
+                        data: { ...v.data },
+                      })),
                       mrsiHistory: (card.mrsiHistory || []).map((v) => ({
                         ...v,
                         data: { ...v.data },
@@ -1158,10 +1363,15 @@ function App() {
           </div>
         )}
 
-        {view === "patients" && <PatientsExplorer onOpenExam={openExamFromPatients} />}
+        {view === "patients" && (
+          <PatientsExplorer onOpenExam={openExamFromPatients} />
+        )}
 
         {examModalOpen && (
-          <div className="modal-overlay" onClick={() => setExamModalOpen(false)}>
+          <div
+            className="modal-overlay"
+            onClick={() => setExamModalOpen(false)}
+          >
             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
               {/* Header du modal */}
               <div
@@ -1196,9 +1406,15 @@ function App() {
                     irmHistory={card.irmHistory || []}
                     mrsiHistory={card.mrsiHistory || []}
                     irmLayers={card.irmLayers || []}
-                    onUpdateLayer={(idx, patch) => updateLayer(card.id, idx, patch)}
-                    onSelectIrmVersion={(versionId) => selectIrmVersion(card.id, versionId)}
-                    onSelectMrsiVersion={(versionId) => selectMrsiVersion(card.id, versionId)}
+                    onUpdateLayer={(idx, patch) =>
+                      updateLayer(card.id, idx, patch)
+                    }
+                    onSelectIrmVersion={(versionId) =>
+                      selectIrmVersion(card.id, versionId)
+                    }
+                    onSelectMrsiVersion={(versionId) =>
+                      selectMrsiVersion(card.id, versionId)
+                    }
                     onFetchSpectrum={fetchSpectrum}
                     renderUploadForm={renderUploadForm}
                     job={cardJobs[card.id] || { loading: false, error: null }}
@@ -1215,7 +1431,9 @@ function App() {
       </div>
 
       {/* RIGHT SIDEBAR (contextual) */}
-      <div className={`sidebar right-sidebar ${isRightSidebarCollapsed ? "collapsed" : ""}`}>
+      <div
+        className={`sidebar right-sidebar ${isRightSidebarCollapsed ? "collapsed" : ""}`}
+      >
         <div className="sidebar-header">
           <span className="emoji">{rightSidebarEmoji}</span>
           <h1>{rightSidebarTitle}</h1>
@@ -1224,7 +1442,9 @@ function App() {
         <button
           className="sidebar-toggle right"
           onClick={() => setIsRightSidebarCollapsed(!isRightSidebarCollapsed)}
-          title={isRightSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+          title={
+            isRightSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"
+          }
         >
           {isRightSidebarCollapsed ? "←" : "→"}
         </button>
@@ -1234,8 +1454,13 @@ function App() {
           <div className="nav-links">
             {/* Traitement choice */}
             <div className="nav-dropdown">
-              <div className="nav-item" onClick={() => setIsTraitementOpen(!isTraitementOpen)}>
-                <span className={`arrow ${isTraitementOpen ? "" : "close"}`}>▼</span>
+              <div
+                className="nav-item"
+                onClick={() => setIsTraitementOpen(!isTraitementOpen)}
+              >
+                <span className={`arrow ${isTraitementOpen ? "" : "close"}`}>
+                  ▼
+                </span>
                 <span className="label">
                   {catalog[selectedTraitement]?.label || "Catalogue non trouvé"}
                 </span>
@@ -1250,7 +1475,9 @@ function App() {
                       onClick={() => {
                         setSelectedTraitement(key);
                         const defaults = {};
-                        Object.entries(val.params || {}).forEach(([k, v]) => (defaults[k] = v.default));
+                        Object.entries(val.params || {}).forEach(
+                          ([k, v]) => (defaults[k] = v.default),
+                        );
                         const allowedTypes = val.type || [];
                         defaults.dataType = allowedTypes[0] || null;
                         setTraitementParams(defaults);
@@ -1279,20 +1506,34 @@ function App() {
 
                 if (!instance) return;
 
-                runTraitement(instance, activeCard.id, selectedTraitement, traitementParams);
+                runTraitement(
+                  instance,
+                  activeCard.id,
+                  selectedTraitement,
+                  traitementParams,
+                );
               }}
               disabled={!canRunActive}
             >
-              {activeJob?.loading ? "Traitement..." : "Lancer sur la carte active"}
+              {activeJob?.loading
+                ? "Traitement..."
+                : "Lancer sur la carte active"}
             </button>
 
             {/* Run traitement (ALL CARDS) */}
-            <button className="btn-secondary" onClick={runTraitementOnAllCards} disabled={!canRunAll}>
+            <button
+              className="btn-secondary"
+              onClick={runTraitementOnAllCards}
+              disabled={!canRunAll}
+            >
               Lancer sur toutes les cartes
             </button>
 
             {/* Params */}
-            <div className="nav-item" onClick={() => setIsParamOpen(!isParamOpen)}>
+            <div
+              className="nav-item"
+              onClick={() => setIsParamOpen(!isParamOpen)}
+            >
               <span className="icon">⚙️</span>
               <span className="label">Paramètres :</span>
             </div>
@@ -1304,7 +1545,8 @@ function App() {
                   <label className="param-label">Type de données :</label>
                   <div style={{ display: "flex", gap: "0.5rem" }}>
                     {["IRM", "MRSI"].map((dt) => {
-                      const isPossible = catalog[selectedTraitement]?.type?.includes(dt);
+                      const isPossible =
+                        catalog[selectedTraitement]?.type?.includes(dt);
                       const isSelected = traitementParams.dataType === dt;
                       return (
                         <div
@@ -1314,7 +1556,10 @@ function App() {
                           }`}
                           onClick={() => {
                             if (!isPossible) return;
-                            setTraitementParams({ ...traitementParams, dataType: dt });
+                            setTraitementParams({
+                              ...traitementParams,
+                              dataType: dt,
+                            });
                           }}
                         >
                           <span className="label">{dt}</span>
@@ -1325,79 +1570,90 @@ function App() {
                 </div>
 
                 {/* Specific params */}
-                {Object.entries(catalog[selectedTraitement]?.params || {}).map(([paramKey, paramDef]) => (
-                  <div key={paramKey} className="param-container">
-                    <label className="param-label">{paramDef.label} :</label>
+                {Object.entries(catalog[selectedTraitement]?.params || {}).map(
+                  ([paramKey, paramDef]) => (
+                    <div key={paramKey} className="param-container">
+                      <label className="param-label">{paramDef.label} :</label>
 
-                    {paramDef.type === "int" && (
-                      <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
-                        <input
+                      {paramDef.type === "int" && (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            width: "100%",
+                          }}
+                        >
+                          <input
+                            className="param-input"
+                            type="number"
+                            min={paramDef.range[0]}
+                            max={paramDef.range[1]}
+                            value={
+                              traitementParams[paramKey] ?? paramDef.default
+                            }
+                            onChange={(e) =>
+                              setTraitementParams({
+                                ...traitementParams,
+                                [paramKey]: parseInt(e.target.value, 10),
+                              })
+                            }
+                          />
+                          <small className="param-range">
+                            Valeurs possibles : {paramDef.range[0]} –{" "}
+                            {paramDef.range[1]}
+                          </small>
+                        </div>
+                      )}
+
+                      {paramDef.type_param === "choix" && (
+                        <select
                           className="param-input"
-                          type="number"
-                          min={paramDef.range[0]}
-                          max={paramDef.range[1]}
                           value={traitementParams[paramKey] ?? paramDef.default}
                           onChange={(e) =>
                             setTraitementParams({
                               ...traitementParams,
-                              [paramKey]: parseInt(e.target.value, 10),
+                              [paramKey]: e.target.value,
                             })
                           }
-                        />
-                        <small className="param-range">
-                          Valeurs possibles : {paramDef.range[0]} – {paramDef.range[1]}
-                        </small>
-                      </div>
-                    )}
-
-                    {paramDef.type_param === "choix" && (
-                      <select
-                        className="param-input"
-                        value={traitementParams[paramKey] ?? paramDef.default}
-                        onChange={(e) =>
-                          setTraitementParams({
-                            ...traitementParams,
-                            [paramKey]: e.target.value,
-                          })
-                        }
-                      >
-                        {paramDef.select.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-
-                    {paramDef.type_param === "choix_multiple" && (
-                      <div className="checkbox-group">
-                        {paramDef.select.map((opt) => {
-                          const current = traitementParams[paramKey] || [];
-                          return (
-                            <label key={opt} className="checkbox-label">
-                              <input
-                                type="checkbox"
-                                checked={current.includes(opt)}
-                                onChange={(e) => {
-                                  const updated = e.target.checked
-                                    ? [...current, opt]
-                                    : current.filter((x) => x !== opt);
-                                  setTraitementParams({
-                                    ...traitementParams,
-                                    [paramKey]: updated,
-                                  });
-                                }}
-                              />
+                        >
+                          {paramDef.select.map((opt) => (
+                            <option key={opt} value={opt}>
                               {opt}
-                            </label>
-                          );
-                        })}
-                      </div>
-                    )}
+                            </option>
+                          ))}
+                        </select>
+                      )}
 
-                    <hr className="param-divider" />
-                  </div>
-                ))}
+                      {paramDef.type_param === "choix_multiple" && (
+                        <div className="checkbox-group">
+                          {paramDef.select.map((opt) => {
+                            const current = traitementParams[paramKey] || [];
+                            return (
+                              <label key={opt} className="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  checked={current.includes(opt)}
+                                  onChange={(e) => {
+                                    const updated = e.target.checked
+                                      ? [...current, opt]
+                                      : current.filter((x) => x !== opt);
+                                    setTraitementParams({
+                                      ...traitementParams,
+                                      [paramKey]: updated,
+                                    });
+                                  }}
+                                />
+                                {opt}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <hr className="param-divider" />
+                    </div>
+                  ),
+                )}
               </div>
             )}
           </div>
@@ -1408,7 +1664,13 @@ function App() {
           <div className="nav-links">
             <div className="card" style={{ margin: 12 }}>
               <h3 style={{ marginTop: 0 }}>🧭 Workflow (Patients)</h3>
-              <ol style={{ paddingLeft: 18, marginBottom: 10, color: "var(--text-muted)" }}>
+              <ol
+                style={{
+                  paddingLeft: 18,
+                  marginBottom: 10,
+                  color: "var(--text-muted)",
+                }}
+              >
                 <li>Choisir un dossier dataset (Chrome/Edge)</li>
                 <li>Envoyer le JSON au backend → affichage patients/exams</li>
                 <li>Sélectionner des examens + lancer la quantification</li>
@@ -1426,14 +1688,19 @@ function App() {
               >
                 <strong>Note “predict1 / predict2”</strong>
                 <div style={{ marginTop: 6 }}>
-                  Côté backend actuel, seule <b>predict1</b> est déclarée (PREDICTION_MAP). <br />
-                  <b>predict2</b> sert de placeholder : si tu la choisis et que le backend ne la gère pas,
-                  tu auras “Type de traitement inconnu”.
+                  Côté backend actuel, seule <b>predict1</b> est déclarée
+                  (PREDICTION_MAP). <br />
+                  <b>predict2</b> sert de placeholder : si tu la choisis et que
+                  le backend ne la gère pas, tu auras “Type de traitement
+                  inconnu”.
                 </div>
               </div>
 
               <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-                <button className="btn-secondary" onClick={() => setView("irm")}>
+                <button
+                  className="btn-secondary"
+                  onClick={() => setView("irm")}
+                >
                   Aller à l’onglet IRM (post-traitement)
                 </button>
                 <button
@@ -1444,19 +1711,20 @@ function App() {
                 </button>
               </div>
             </div>
-
-
           </div>
         )}
 
         {/*  Home/Other: minimal content */}
         {view !== "irm" && view !== "patients" && (
           <div className="nav-links">
-            <div className="card" style={{ margin: 12, color: "var(--text-muted)" }}>
+            <div
+              className="card"
+              style={{ margin: 12, color: "var(--text-muted)" }}
+            >
               <h3 style={{ marginTop: 0 }}>👋 Astuce</h3>
               <p style={{ marginBottom: 0 }}>
-                Va sur <b>Upload IRM</b> pour accéder au post-traitement, ou <b>Patients</b> pour explorer
-                le dataset.
+                Va sur <b>Upload IRM</b> pour accéder au post-traitement, ou{" "}
+                <b>Patients</b> pour explorer le dataset.
               </p>
             </div>
           </div>
