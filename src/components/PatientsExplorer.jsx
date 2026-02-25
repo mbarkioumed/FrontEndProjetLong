@@ -40,7 +40,7 @@ const errorLog = (label, data) => {
 export default function PatientsExplorer({ onOpenExam }) {
   const { token } = useContext(AuthContext);
 
-  const [raw, setRaw] = useState(""); // debug JSON visible
+  const [raw, setRaw] = useState(""); 
   const [datasetJson, setDatasetJson] = useState(null);
   const [fileMap, setFileMap] = useState({}); // relativePath -> File
   const [patientsTree, setPatientsTree] = useState(null);
@@ -134,19 +134,9 @@ export default function PatientsExplorer({ onOpenExam }) {
     });
   };
 
-  const [openPatientId, setOpenPatientId] = useState(null);
-  const [searchPatientId, setSearchPatientId] = useState("");
-
   const normalizedPatients = useMemo(
     () => (patientsTree ? normalizeBackendTree(patientsTree) : []),
     [patientsTree],
-  );
-
-  const filteredPatients = normalizedPatients.filter((p) =>
-            p.patientId
-              .toString()
-              .toLowerCase()
-              .includes(searchPatientId.toLowerCase())
   );
 
   // ---------- UI handlers ----------
@@ -467,74 +457,77 @@ const hasAnyError = (resp) => extractBackendErrors(resp).length > 0;
     };
   };
 
-  // Upload missing files using /upload-irm and /upload-mrsi (multipart/form-data)
-  const uploadMissingFile = async ({ type, missingPath }) => {
-    const normMissing = normalizeRelPath(missingPath);
-    const hit = findFileInMap(normMissing);
+ // Upload missing files using the new endpoints (multipart/form-data)
+const uploadMissingFile = async ({ type, missingPath }) => {
+  const normMissing = normalizeRelPath(missingPath);
+  const hit = findFileInMap(normMissing);
 
-    log("missing resolve", {
-      missing: normMissing,
-      detectedType: type,
-      found: !!hit?.file,
-      matchedKey: hit?.key || null,
-    });
+  log("missing resolve", {
+    missing: normMissing,
+    detectedType: type,
+    found: !!hit?.file,
+    matchedKey: hit?.key || null,
+  });
 
-    if (!hit?.file) {
-      const tried = stripLeadingDataset(normMissing);
-      errorLog("missing not found in fileMap", { missing: normMissing, tried });
-      throw new Error(`Fichier introuvable sur disque pour: ${normMissing}`);
-    }
+  if (!hit?.file) {
+    const tried = stripLeadingDataset(normMissing);
+    errorLog("missing not found in fileMap", { missing: normMissing, tried });
+    throw new Error(`Fichier introuvable sur disque pour: ${normMissing}`);
+  }
 
-    const t = String(type || "").toUpperCase();
-    const isMrsi = t.includes("MRSI");
-    const endpoint = isMrsi ? "/upload-mrsi/" : "/upload-irm/"; // MASK treated as IRM
+  const t = String(type || "").toUpperCase();
+  const isMrsi = t.includes("MRSI");
 
-    const form = new FormData();
+  const endpoint = isMrsi
+    ? "/storage/upload_memoire_mrsi"
+    : "/storage/upload_memoire_irm"; // MASK treated as IRM
 
-    // Important: force filename = missingPath so backend storage key matches /predict list
-    form.append("fichier", hit.file, normMissing);
+  const form = new FormData();
 
-    log("upload missing start", {
-      endpoint,
-      filenameSent: normMissing,
-      localName: hit.file.name,
-      size: hit.file.size,
-    });
+  form.append("fichier", hit.file, normMissing);
 
-    const res = await fetch(`${BASE_URL}${endpoint}`, {
-      method: "POST",
-      headers: {
-        ...authHeaders(),
-        // Do not set Content-Type for FormData
-      },
-      body: form,
-    });
+  log("upload missing start", {
+    endpoint,
+    filenameSent: normMissing,
+    localName: hit.file.name,
+    size: hit.file.size,
+  });
 
-    const json = await res.json().catch(() => ({}));
+  const res = await fetch(`${BASE_URL}${endpoint}`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(),
+     
+    },
+    body: form,
+  });
 
-    log("upload missing response", {
-      endpoint,
-      ok: res.ok,
-      status: res.status,
-      sample: json?.error ? { error: json.error } : "ok",
-    });
+  const json = await res.json().catch(() => ({}));
 
-    if (!res.ok || json?.error) {
-      const msg = json?.detail || json?.error || `HTTP ${res.status}`;
-      throw new Error(`Upload échoué (${endpoint}) pour ${normMissing}: ${msg}`);
-    }
+  log("upload missing response", {
+    endpoint,
+    ok: res.ok,
+    status: res.status,
+    sample: json?.error ? { error: json.error } : "ok",
+  });
 
-    return json;
-  };
+  if (!res.ok || json?.error) {
+    const msg = json?.detail || json?.error || `HTTP ${res.status}`;
+    throw new Error(
+      `Upload mémoire échoué (${endpoint}) pour ${normMissing}: ${msg}`,
+    );
+  }
 
+  return json;
+};
 const uploadMissingFilesBatch = async (pairs, concurrency = 3) => {
   const queue = pairs.slice();
-  const doneRef = { value: 0 };
+  let doneCount = 0;
   const errors = [];
 
   log("upload batch start", { total: pairs.length, concurrency });
 
-  const worker = async (wid) => {
+  const runOne = async (wid) => {
     for (;;) {
       const item = queue.shift();
       if (!item) return;
@@ -542,22 +535,24 @@ const uploadMissingFilesBatch = async (pairs, concurrency = 3) => {
       try {
         log(`worker#${wid} upload`, item);
         await uploadMissingFile({ type: item.type, missingPath: item.name });
-        doneRef.value += 1;
+
+        doneCount += 1;
         setQuant((q) => ({
           ...q,
-          info: `Upload manquants: ${doneRef.value}/${pairs.length}`,
+          info: `Upload manquants: ${doneCount}/${pairs.length}`,
         }));
       } catch (e) {
         const msg = e?.message || String(e);
         errors.push({ item, error: msg });
         errorLog(`worker#${wid} upload failed`, { item, error: msg });
-        // on continue, on ne throw pas
+        // continue
       }
     }
   };
 
-  const workers = Array.from({ length: concurrency }, (_, i) => worker(i + 1));
-  await Promise.all(workers);
+  await Promise.all(
+    Array.from({ length: concurrency }, (_, i) => runOne(i + 1)),
+  );
 
   log("upload batch done", { total: pairs.length, failed: errors.length });
 
@@ -680,7 +675,6 @@ if (hasAnyError(r1)) {
   // ---------- selection counts ----------
   const selectedCount = selectedExamKeys.size;
 
-  
   // ---------- render ----------
   return (
     <div className="card">
@@ -805,6 +799,33 @@ if (hasAnyError(r1)) {
             Réinitialiser
           </button>
         </div>
+
+        <p
+          style={{
+            marginTop: 10,
+            color: "var(--text-muted)",
+            fontSize: "0.85rem",
+          }}
+        >
+          Debug : le JSON généré est affiché ci-dessous. Tu peux aussi coller un
+          JSON ici si besoin.
+        </p>
+
+        <textarea
+          value={raw}
+          onChange={(e) => setRaw(e.target.value)}
+          placeholder="JSON dataset (debug)"
+          style={{
+            width: "100%",
+            minHeight: 140,
+            fontFamily: "monospace",
+            padding: 10,
+            borderRadius: 10,
+            border: "1px solid var(--border-color)",
+            background: "var(--card-bg)",
+            color: "var(--text-color)",
+          }}
+        />
       </div>
 
       {err && (
@@ -821,36 +842,6 @@ if (hasAnyError(r1)) {
         </div>
       )}
 
-<<<<<<< HEAD
-=======
-      {/* Search By PatientId */}
-      <div
-        style={{
-          marginTop: 16,
-          padding: 12,
-          borderRadius: 12,
-          border: "1px solid var(--border-color)",
-          background: "rgba(255,255,255,0.02)",
-        }}
-      >
-        <input
-          type="text"
-          placeholder="🔍 Rechercher par ID patient..."
-          value={searchPatientId}
-          onChange={(e) => setSearchPatientId(e.target.value)}
-          style={{
-            width: "100%",
-            padding: 8,
-            borderRadius: 8,
-            border: "1px solid var(--border-color)",
-            background: "var(--card-bg)",
-            color: "var(--text-color)",
-          }}
-        />
-      </div>
-
-      {/* Patients tree */}
->>>>>>> 7e1110718b3eec2d05aeff521580684d912e97d9
       <div style={{ marginTop: 16 }}>
         {!patientsTree && (
           <div style={{ color: "var(--text-muted)" }}>
@@ -865,150 +856,119 @@ if (hasAnyError(r1)) {
           </div>
         )}
 
-        
-        {filteredPatients.map((p) => {
-          const isOpen = openPatientId === p.patientId;
-          
-          return (
+        {normalizedPatients.map((p) => (
           <div
             key={p.patientId}
             style={{
               marginTop: 12,
+              padding: 12,
               borderRadius: 12,
               border: "1px solid var(--border-color)",
               background: "var(--card-bg)",
-              overflow: "hidden",
             }}
           >
             <div
-              onClick={() =>
-                setOpenPatientId(isOpen ? null : p.patientId)
-              }
               style={{
-                padding: 12,
                 display: "flex",
                 justifyContent: "space-between",
                 gap: 12,
                 flexWrap: "wrap",
-                cursor: "pointer",
               }}
             >
-              <strong>{isOpen ? "▼" : "▶"} Patient: {p.patientId}</strong>
+              <strong>Patient: {p.patientId}</strong>
               <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
                 {p.analyses.length} examen(s)
               </span>
             </div>
 
-            {isOpen && (
-            <div style={{ padding: 12, paddingTop: 0 }}>
-              <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-                {p.analyses.map((ex, idx) => {
-                  const key = examKey(p.patientId, ex.date, idx);
-                  const checked = selectedExamKeys.has(key);
+            <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+              {p.analyses.map((ex, idx) => {
+                const key = examKey(p.patientId, ex.date, idx);
+                const checked = selectedExamKeys.has(key);
 
-                  return (
+                return (
+                  <div
+                    key={`${p.patientId}-${ex.date}-${idx}`}
+                    style={{
+                      padding: 10,
+                      borderRadius: 10,
+                      background: "rgba(255,255,255,0.02)",
+                      border: "1px solid var(--border-color)",
+                    }}
+                  >
                     <div
-                      key={`${p.patientId}-${ex.date}-${idx}`}
                       style={{
-                        padding: 10,
-                        borderRadius: 10,
-                        background: "rgba(255,255,255,0.02)",
-                        border: "1px solid var(--border-color)",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 10,
+                        flexWrap: "wrap",
+                        alignItems: "center",
                       }}
                     >
                       <div
                         style={{
                           display: "flex",
-                          justifyContent: "space-between",
                           gap: 10,
-                          flexWrap: "wrap",
                           alignItems: "center",
+                          flexWrap: "wrap",
                         }}
                       >
-                        <div
+                        <label
                           style={{
                             display: "flex",
-                            gap: 10,
+                            gap: 8,
                             alignItems: "center",
-                            flexWrap: "wrap",
+                            cursor: "pointer",
                           }}
                         >
-                          <label
-                            style={{
-                              display: "flex",
-                              gap: 8,
-                              alignItems: "center",
-                              cursor: "pointer",
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleExam(key)}
-                              disabled={loading || quant.loading}
-                            />
-                            <strong>Date: {ex.date}</strong>
-                          </label>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleExam(key)}
+                            disabled={loading || quant.loading}
+                          />
+                          <strong>Date: {ex.date}</strong>
+                        </label>
 
-                          <div
-                            style={{
-                              color: "var(--text-muted)",
-                              fontSize: "0.85rem",
-                            }}
-                          >
-                            {ex.files.length} fichier(s)
-                          </div>
-                        </div>
-
-                        <button
-                          className="btn-primary"
-                          onClick={() => handleOpenExam(p.patientId, ex.date, ex)}
-                          disabled={loading || quant.loading}
+                        <div
+                          style={{
+                            color: "var(--text-muted)",
+                            fontSize: "0.85rem",
+                          }}
                         >
-                          Ouvrir cet examen
-                        </button>
+                          {ex.files.length} fichier(s)
+                        </div>
                       </div>
 
-                      <div
-                        style={{
-                          marginTop: 8,
-                          fontFamily: "monospace",
-                          fontSize: "0.82rem",
-                        }}
+                      <button
+                        className="btn-primary"
+                        onClick={() => handleOpenExam(p.patientId, ex.date, ex)}
+                        disabled={loading || quant.loading}
                       >
-                        {ex.files.map((f, j) => (
-                          <div
-                            key={`${f.relative_path}-${j}`}
-                            style={{ opacity: 0.95 }}
-                          >
-                            • {f.type_analyse || "?"}{" "}
-                            {f.modalites_IRM ? `(mod: ${f.modalites_IRM})` : ""} —{" "}
-                            <span style={{ color: "var(--text-muted)" }}>
-                              {f.relative_path || f.name}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-
-                      {Object.keys(fileMap).length > 0 &&
-                        ex.files.some(
-                          (f) => f.relative_path && !fileMap[f.relative_path],
-                        ) && (
-                          <div
-                            style={{
-                              marginTop: 8,
-                              color: "var(--text-muted)",
-                              fontSize: "0.8rem",
-                            }}
-                          >
-                            ⚠️ Certains chemins renvoyés par le backend ne matchent
-                            pas ceux du navigateur (relative_path). Vérifie que le
-                            backend renvoie bien les mêmes `relativePath` que
-                            `webkitRelativePath`.
-                          </div>
-                        )}
+                        Ouvrir cet examen
+                      </button>
                     </div>
-<<<<<<< HEAD
+
+                    <div
+                      style={{
+                        marginTop: 8,
+                        fontFamily: "monospace",
+                        fontSize: "0.82rem",
+                      }}
+                    >
+                      {ex.files.map((f, j) => (
+                        <div
+                          key={`${f.relative_path}-${j}`}
+                          style={{ opacity: 0.95 }}
+                        >
+                          • {f.type_analyse || "?"}{" "}
+                          {f.modalites_IRM ? `(mod: ${f.modalites_IRM})` : ""} —{" "}
+                          <span style={{ color: "var(--text-muted)" }}>
+                            {f.relative_path || f.name}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
 
                     {Object.keys(fileMap).length > 0 &&
                       ex.files.some(
@@ -1030,16 +990,9 @@ if (hasAnyError(r1)) {
                   </div>
                 );
               })}
-=======
-                  );
-                })}
-              </div>
->>>>>>> 7e1110718b3eec2d05aeff521580684d912e97d9
             </div>
-            )}
           </div>
-          );
-        })}
+        ))}
       </div>
 
       {quant.result && (
