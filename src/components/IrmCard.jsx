@@ -4,6 +4,8 @@ import SliceCanvas from "./SliceCanvas";
 import SpectrumChart from "./SpectrumChart";
 import { getData } from "../utils/dataCache";
 
+import MetaboliteHeatmap from "./MetaboliteHeatmap";
+
 // Helpers orientation 2D
 const transpose2D = (m) => {
   if (!m || !m.length) return m;
@@ -126,8 +128,10 @@ const IrmCard = ({
   onSelectMrsiVersion,
   irmLayers = [],
   onUpdateLayer,
+  onUpdateMrsiData,
 }) => {
   const [isOpen, setIsOpen] = useState(true);
+
 
   //      Focus modal state
   const [focusedView, setFocusedView] = useState(null); // "sagittal" | "coronal" | "axial" | null
@@ -205,6 +209,24 @@ const IrmCard = ({
   //      detect version changes too
   const irmVersionKey = irmData?.__versionId || "none";
   const mrsiVersionKey = mrsiData?.__versionId || "none";
+
+  //      Slider for Concentration Heatmap
+  const [heatmapSlice, setHeatmapSlice] = useState(0);
+
+  
+  useEffect(() => {
+    if (mrsiData?.type === "MRSI_VOLUME" && mrsiData?.quantification) {
+      console.log(
+        "Quantification keys:",
+        Object.keys(mrsiData.quantification)
+      );
+
+      console.log(
+        "First voxel:",
+        Object.values(mrsiData.quantification)[0]
+      );
+    }
+  }, [mrsiData]);
 
   // Sync IRM data changes
   useEffect(() => {
@@ -517,6 +539,17 @@ const IrmCard = ({
     if (zVal !== null) setMrsiSliceIndex(z);
 
     setSelectedVoxel({ x, y, z });
+
+    // 🔹 Important : propager le voxel sélectionné dans mrsiData
+    if (mrsiData) {
+      const updatedMrsi = {
+        ...mrsiData,
+        voxel: { x, y, z }
+      };
+
+      // ⚠️ Ici tu dois appeler le parent pour mettre à jour la carte
+      onUpdateMrsiData && onUpdateMrsiData(updatedMrsi);
+    }
 
     if (onFetchSpectrum && mrsiData?.nom) {
       const data = await onFetchSpectrum(mrsiData.nom, x, y, z);
@@ -1277,8 +1310,136 @@ const IrmCard = ({
           )}
         </div>
 
- 
+              {/* --- Quantification Results --- */}
+              {mrsiData?.quantification && mrsiData.type === "MRSI" && (
+                <div
+                  style={{
+                    marginTop: "0.75rem",
+                    padding: "0.75rem",
+                    borderRadius: 12,
+                    border: "1px solid var(--border-color)",
+                    background: "rgba(255,255,255,0.03)",
+                    fontSize: 13,
+                  }}
+                >
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                    Quantification – Voxel ({mrsiData.voxel?.x}, {mrsiData.voxel?.y}, {mrsiData.voxel?.z})
+                  </div>
 
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {Object.entries(mrsiData.quantification)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([met, value]) => (
+                        <div key={met} style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span>{met}</span>
+                          <span style={{ fontWeight: 500 }}>
+                            {Number(value).toFixed(4)}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {mrsiData?.type === "MRSI_VOLUME" && (
+                <div
+                  style={{
+                    marginTop: "0.75rem",
+                    padding: "0.75rem",
+                    borderRadius: 12,
+                    border: "1px solid var(--border-color)",
+                    background: "rgba(255,255,255,0.03)",
+                  }}
+                >
+                  <div style={{ fontWeight: 600, marginBottom: 10 }}>
+                    Quantification – Heatmaps
+                  </div>
+
+                  {/* Slider Z */}
+                  <div style={{ marginTop: 10 }}>
+                    <label>Slice Z : {heatmapSlice}</label>
+                    <input
+                      type="range"
+                      min="0"
+                      max={(mrsiData.dimensions?.Z || 1) - 1}
+                      value={heatmapSlice}
+                      onChange={(e) =>
+                        setHeatmapSlice(parseInt(e.target.value, 10))
+                      }
+                    />
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem", marginTop: 12 }}>
+
+                    <MetaboliteHeatmap
+                      volumeData={mrsiData.quantification}
+                      dimensions={mrsiData.dimensions}
+                      metabolite="Cr"
+                      sliceIndex={heatmapSlice}
+                    />
+
+                    <MetaboliteHeatmap
+                      volumeData={mrsiData.quantification}
+                      dimensions={mrsiData.dimensions}
+                      metabolite="PCh"
+                      sliceIndex={heatmapSlice}
+                    />
+
+                    <MetaboliteHeatmap
+                      volumeData={mrsiData.quantification}
+                      dimensions={mrsiData.dimensions}
+                      metabolite="GSH"
+                      sliceIndex={heatmapSlice}
+                    />
+
+                    <MetaboliteHeatmap
+                      volumeData={mrsiData.quantification}
+                      dimensions={mrsiData.dimensions}
+                      metabolite="Glu"
+                      sliceIndex={heatmapSlice}
+                    />
+
+                    <MetaboliteHeatmap
+                      volumeData={mrsiData.quantification}
+                      dimensions={mrsiData.dimensions}
+                      metabolite="NAA"
+                      sliceIndex={heatmapSlice}
+                    />
+
+                    <MetaboliteHeatmap
+                      volumeData={mrsiData.quantification}
+                      dimensions={mrsiData.dimensions}
+                      metabolite="Gln"
+                      sliceIndex={heatmapSlice}
+                    />
+
+                    <MetaboliteHeatmap
+                      volumeData={mrsiData.quantification}
+                      dimensions={mrsiData.dimensions}
+                      metabolite="Lac"
+                      sliceIndex={heatmapSlice}
+                    />
+
+                    <MetaboliteHeatmap
+                      volumeData={mrsiData.quantification}
+                      dimensions={mrsiData.dimensions}
+                      metabolite="mI"
+                      sliceIndex={heatmapSlice}
+                    />
+                    <MetaboliteHeatmap
+                      volumeData={mrsiData.quantification}
+                      dimensions={mrsiData.dimensions}
+                      metabolite="Asp"
+                      sliceIndex={heatmapSlice}
+                    />
+
+                  </div>
+
+                  <div style={{ marginTop: 10, fontSize: 12 }}>
+                    Voxels traités : {mrsiData.processed_voxels} / {mrsiData.total_voxels}
+                  </div>
+                </div>
+              )}
 
 
         {/* --- Upload if missing --- */}

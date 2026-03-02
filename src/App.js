@@ -838,6 +838,7 @@ function App() {
       URL.revokeObjectURL(blobUrl);
 
       const next = data?.[key];
+      console.log("Résultat traitement:", next);
       if (!next) throw new Error("Réponse traitement inattendue.");
       if (next?.error) throw new Error(next.error);
 
@@ -846,11 +847,13 @@ function App() {
       if (next.type === "IRM") {
         setIrmResults(next);
         pushVersionToCard(cardId, "IRM", label, next, validParams);
-      } else if (next.type === "MRSI") {
+
+      } else if (next.type === "MRSI" || next.type === "MRSI_VOLUME") {
         setMrsiResults(next);
         pushVersionToCard(cardId, "MRSI", label, next, validParams);
+
       } else {
-        throw new Error("Type traitement inconnu.");
+        throw new Error(`Type traitement inconnu: ${next.type}`);
       }
 
       setView("irm");
@@ -1602,6 +1605,24 @@ function App() {
                             Valeurs possibles : {paramDef.range[0]} –{" "}
                             {paramDef.range[1]}
                           </small>
+                        </div>
+                      )}
+
+                      {paramDef.type === "bool" && (
+                        <div style={{ marginTop: "0.5rem" }}>
+                          <label className="checkbox-label">
+                            <input
+                              type="checkbox"
+                              checked={traitementParams[paramKey] ?? paramDef.default}
+                              onChange={(e) =>
+                                setTraitementParams({
+                                  ...traitementParams,
+                                  [paramKey]: e.target.checked,
+                                })
+                              }
+                            />
+                            {paramDef.label}
+                          </label>
                         </div>
                       )}
 
