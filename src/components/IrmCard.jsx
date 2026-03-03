@@ -663,41 +663,47 @@ const IrmCard = ({
       .join(" | ");
   }, [activeMrsiVersion]);
 
-if (!irmData && !mrsiData) {
-  return (
-    <div
-      className={`card irm-card ${isActive ? "active" : ""}`}
-      onClick={handleSelectCard}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") handleSelectCard();
-      }}
-      style={{ cursor: onSelect ? "pointer" : "default" }}
-    >
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button
-          className="btn-secondary"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete(cardId);
+  if (!irmData && !mrsiData) {
+    return (
+      <div
+        className={`card irm-card ${isActive ? "active" : ""}`}
+        onClick={handleSelectCard}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") handleSelectCard();
+        }}
+        style={{ cursor: onSelect ? "pointer" : "default" }}
+      >
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button
+            className="btn-secondary"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(cardId);
+            }}
+            style={{ color: "var(--danger)" }}
+          >
+            Supprimer
+          </button>
+        </div>
+
+        <h3>Nouvelle Carte</h3>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: "1rem",
           }}
-          style={{ color: "var(--danger)" }}
+          onClick={(e) => e.stopPropagation()}
         >
-          Supprimer
-        </button>
+          <div>{renderUpload("IRM", cardId)}</div>
+          <div>{renderUpload("MRSI", cardId)}</div>
+        </div>
       </div>
-
-      <h3>Nouvelle Carte</h3>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}
-           onClick={(e) => e.stopPropagation()}>
-        <div>{renderUpload("IRM", cardId)}</div>
-        <div>{renderUpload("MRSI", cardId)}</div>
-      </div>
-    </div>
-  );
-}
+    );
+  }
   const {
     sagW,
     sagH,
@@ -1561,16 +1567,15 @@ if (!irmData && !mrsiData) {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
                     gap: 16,
                     marginTop: 12,
-                    alignItems: "start",
                   }}
                 >
                   {mrsiData?.quantification &&
                     mrsiData?.dimensions &&
                     HEATMAP_METABOLITES.map((m) => (
-                      <div key={m} style={{ width: 140 }}>
+                      <div key={m} style={{ width: "100%" }}>
                         <MetaboliteHeatmap
                           ref={setHeatmapRef(m)}
                           metabolite={m}
