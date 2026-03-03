@@ -255,7 +255,7 @@ const IrmCard = ({
 
   const setHeatmapRef = (m) => (instance) => {
     if (instance) heatmapRefs.current[m] = instance;
-    else delete heatmapRefs.current[m]; 
+    else delete heatmapRefs.current[m];
   };
   const exportAllHeatmapsPNG = async () => {
     const z = heatmapSlice;
@@ -663,74 +663,41 @@ const IrmCard = ({
       .join(" | ");
   }, [activeMrsiVersion]);
 
-  if (!irmData && !mrsiData) {
-    return (
-      <div
-        className={`card irm-card ${isActive ? "active" : ""}`}
-        onClick={handleSelectCard}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") handleSelectCard();
-        }}
-        style={{ cursor: onSelect ? "pointer" : "default" }}
-      >
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button
-            className="btn-secondary"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(cardId);
-            }}
-            style={{ color: "var(--danger)" }}
-          >
-            Supprimer
-          </button>
-        </div>
-
-        {job?.error && (
-          <div style={{ color: "var(--danger)", marginBottom: "0.5rem" }}>
-            {job.error}
-          </div>
-        )}
-        {job?.loading && (
-          <div style={{ color: "var(--text-muted)", marginBottom: "0.5rem" }}>
-            Traitement en cours...
-          </div>
-        )}
-
-        <h3>Nouvelle Carte</h3>
-
-        {/* Grid heatmaps (taille vraiment réduite) */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, max-content)",
-            justifyContent: "center",
-            gap: 12,
-            marginTop: 12,
+if (!irmData && !mrsiData) {
+  return (
+    <div
+      className={`card irm-card ${isActive ? "active" : ""}`}
+      onClick={handleSelectCard}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") handleSelectCard();
+      }}
+      style={{ cursor: onSelect ? "pointer" : "default" }}
+    >
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button
+          className="btn-secondary"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(cardId);
           }}
+          style={{ color: "var(--danger)" }}
         >
-          {HEATMAP_METABOLITES.map((m) => (
-            <div key={m} style={{ width: 140 }}>
-              <MetaboliteHeatmap
-                ref={setHeatmapRef(m)}
-                metabolite={m}
-                volumeData={mrsiData.quantification}
-                dimensions={mrsiData.dimensions}
-                sliceIndex={heatmapSlice}
-                cursorVoxel={selectedVoxel || mrsiData?.voxel} 
-                onVoxelClick={(x, y, z) => handleVoxelClick(x, y, z)}
-                width={90}
-                height={90}
-              />
-            </div>
-          ))}
-        </div>
+          Supprimer
+        </button>
       </div>
-    );
-  }
 
+      <h3>Nouvelle Carte</h3>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}
+           onClick={(e) => e.stopPropagation()}>
+        <div>{renderUpload("IRM", cardId)}</div>
+        <div>{renderUpload("MRSI", cardId)}</div>
+      </div>
+    </div>
+  );
+}
   const {
     sagW,
     sagH,
@@ -1443,7 +1410,7 @@ const IrmCard = ({
         </div>
 
         {/* Quantification voxel */}
-        {mrsiData?.quantification && mrsiData.type === "MRSI" && (
+        {mrsiData && mrsiData.type === "MRSI" && mrsiData.quantification && (
           <CollapsiblePanel
             title={`Quantification – Voxel (${mrsiData?.voxel?.x ?? "?"}, ${
               mrsiData?.voxel?.y ?? "?"
@@ -1459,65 +1426,23 @@ const IrmCard = ({
         )}
 
         {/* Heatmaps */}
-        {mrsiData?.type === "MRSI_VOLUME" && (
-          <CollapsiblePanel
-            title="Quantification – Heatmaps"
-            defaultOpen={false}
-          >
-            <div
-              style={{
-                marginTop: "0.5rem",
-                padding: "0.75rem",
-                borderRadius: 12,
-                border: "1px solid var(--border-color)",
-                background: "rgba(255,255,255,0.03)",
-              }}
-              onClick={(e) => e.stopPropagation()}
+        {mrsiData &&
+          mrsiData.type === "MRSI_VOLUME" &&
+          mrsiData.quantification &&
+          mrsiData.dimensions && (
+            <CollapsiblePanel
+              title="Quantification – Heatmaps"
+              defaultOpen={false}
             >
               <div
                 style={{
-                  display: "flex",
-                  gap: 10,
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                }}
-              >
-                <button
-                  className="btn-primary"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    exportAllHeatmapsPNG();
-                  }}
-                  style={{ fontSize: 12 }}
-                >
-                  Export ALL PNG (slice Z={heatmapSlice})
-                </button>
-
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <label style={{ fontSize: 12 }}>
-                    Slice Z : {heatmapSlice}
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max={(mrsiData.dimensions?.Z || 1) - 1}
-                    value={heatmapSlice}
-                    onChange={(e) =>
-                      setHeatmapSlice(parseInt(e.target.value, 10))
-                    }
-                  />
-                </div>
-              </div>
-
-              {/* Histogram */}
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: 10,
+                  marginTop: "0.5rem",
+                  padding: "0.75rem",
                   borderRadius: 12,
                   border: "1px solid var(--border-color)",
-                  background: "rgba(0,0,0,0.05)",
+                  background: "rgba(255,255,255,0.03)",
                 }}
+                onClick={(e) => e.stopPropagation()}
               >
                 <div
                   style={{
@@ -1527,92 +1452,146 @@ const IrmCard = ({
                     alignItems: "center",
                   }}
                 >
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>
-                    📊 Histogramme (slice Z={heatmapSlice})
-                  </div>
+                  <button
+                    className="btn-primary"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      exportAllHeatmapsPNG();
+                    }}
+                    style={{ fontSize: 12 }}
+                  >
+                    Export ALL PNG (slice Z={heatmapSlice})
+                  </button>
 
                   <div
                     style={{ display: "flex", alignItems: "center", gap: 8 }}
                   >
-                    <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                      Métabolite:
-                    </span>
-                    <select
-                      value={histMetabolite}
-                      onChange={(e) => setHistMetabolite(e.target.value)}
-                      style={{
-                        fontSize: 12,
-                        padding: "4px 8px",
-                        borderRadius: 10,
-                        background: "var(--bg-secondary)",
-                        color: "var(--text-main)",
-                        border: "1px solid var(--border-color)",
-                      }}
+                    <label style={{ fontSize: 12 }}>
+                      Slice Z : {heatmapSlice}
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max={(mrsiData.dimensions?.Z || 1) - 1}
+                      value={heatmapSlice}
+                      onChange={(e) =>
+                        setHeatmapSlice(parseInt(e.target.value, 10))
+                      }
+                    />
+                  </div>
+                </div>
+
+                {/* Histogram */}
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: 10,
+                    borderRadius: 12,
+                    border: "1px solid var(--border-color)",
+                    background: "rgba(0,0,0,0.05)",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>
+                      📊 Histogramme (slice Z={heatmapSlice})
+                    </div>
+
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 8 }}
                     >
-                      {HEATMAP_METABOLITES.map((m) => (
-                        <option key={m} value={m}>
-                          {m}
-                        </option>
-                      ))}
-                    </select>
+                      <span
+                        style={{ fontSize: 12, color: "var(--text-muted)" }}
+                      >
+                        Métabolite:
+                      </span>
+                      <select
+                        value={histMetabolite}
+                        onChange={(e) => setHistMetabolite(e.target.value)}
+                        style={{
+                          fontSize: 12,
+                          padding: "4px 8px",
+                          borderRadius: 10,
+                          background: "var(--bg-secondary)",
+                          color: "var(--text-main)",
+                          border: "1px solid var(--border-color)",
+                        }}
+                      >
+                        {HEATMAP_METABOLITES.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {selectedVoxel?.x != null &&
+                      selectedVoxel?.y != null &&
+                      selectedVoxel?.z != null && (
+                        <div
+                          style={{ fontSize: 12, color: "var(--text-muted)" }}
+                        >
+                          Voxel: ({selectedVoxel.x},{selectedVoxel.y},
+                          {selectedVoxel.z})
+                        </div>
+                      )}
                   </div>
 
-                  {selectedVoxel?.x != null &&
-                    selectedVoxel?.y != null &&
-                    selectedVoxel?.z != null && (
-                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                        Voxel: ({selectedVoxel.x},{selectedVoxel.y},
-                        {selectedVoxel.z})
+                  <div style={{ marginTop: 10 }}>
+                    <MetaboliteHistogram
+                      volumeData={mrsiData.quantification}
+                      dimensions={mrsiData.dimensions}
+                      metabolite={histMetabolite}
+                      sliceIndex={heatmapSlice}
+                      selectedVoxel={selectedVoxel || mrsiData?.voxel}
+                      width={720}
+                      height={160}
+                      bins={28}
+                    />
+                  </div>
+                </div>
+
+                {/* Grid heatmaps responsive */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    gap: 16,
+                    marginTop: 12,
+                    alignItems: "start",
+                  }}
+                >
+                  {mrsiData?.quantification &&
+                    mrsiData?.dimensions &&
+                    HEATMAP_METABOLITES.map((m) => (
+                      <div key={m} style={{ width: 140 }}>
+                        <MetaboliteHeatmap
+                          ref={setHeatmapRef(m)}
+                          metabolite={m}
+                          volumeData={mrsiData?.quantification}
+                          dimensions={mrsiData?.dimensions}
+                          sliceIndex={heatmapSlice}
+                          cursorVoxel={selectedVoxel || mrsiData?.voxel}
+                          onVoxelClick={(x, y, z) => handleVoxelClick(x, y, z)}
+                          width={90}
+                          height={90}
+                        />
                       </div>
-                    )}
+                    ))}
                 </div>
-
-                <div style={{ marginTop: 10 }}>
-                  <MetaboliteHistogram
-                    volumeData={mrsiData.quantification}
-                    dimensions={mrsiData.dimensions}
-                    metabolite={histMetabolite}
-                    sliceIndex={heatmapSlice}
-                    selectedVoxel={selectedVoxel || mrsiData?.voxel}
-                    width={720}
-                    height={160}
-                    bins={28}
-                  />
+                <div style={{ marginTop: 10, fontSize: 12 }}>
+                  Voxels traités : {mrsiData.processed_voxels} /{" "}
+                  {mrsiData.total_voxels}
                 </div>
               </div>
-
-{/* Grid heatmaps responsive */}
-<div
-  style={{
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: 16,
-    marginTop: 12,
-    alignItems: "start",
-  }}
->
-  {HEATMAP_METABOLITES.map((m) => (
-    <MetaboliteHeatmap
-      key={m}
-      ref={setHeatmapRef(m)}
-      metabolite={m}
-      volumeData={mrsiData.quantification}
-      dimensions={mrsiData.dimensions}
-      sliceIndex={heatmapSlice}
-      cursorVoxel={selectedVoxel || mrsiData?.voxel}  
-      onVoxelClick={(x, y, z) => handleVoxelClick(x, y, z)}
-      size={140}                                      
-      maxCanvas={160}                        
-    />
-  ))}
-</div>
-              <div style={{ marginTop: 10, fontSize: 12 }}>
-                Voxels traités : {mrsiData.processed_voxels} /{" "}
-                {mrsiData.total_voxels}
-              </div>
-            </div>
-          </CollapsiblePanel>
-        )}
+            </CollapsiblePanel>
+          )}
         {!irmData && (
           <div
             className="slice-control card"

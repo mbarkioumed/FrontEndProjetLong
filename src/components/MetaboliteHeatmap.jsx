@@ -71,8 +71,8 @@ const MetaboliteHeatmap = forwardRef(function MetaboliteHeatmap(
     title = null,
 
     //  Responsive sizing
-    size = 140,      
-    maxCanvas = 180, 
+    size = 140,
+    maxCanvas = 180,
   },
   ref,
 ) {
@@ -120,7 +120,8 @@ const MetaboliteHeatmap = forwardRef(function MetaboliteHeatmap(
   }, [volumeData, dimensions, metabolite, sliceIndex]);
 
   const stats = useMemo(() => {
-    if (!sliceValues.length) return { min: 0, max: 0, p2: 0, p50: 0, p95: 0, p98: 0 };
+    if (!sliceValues.length)
+      return { min: 0, max: 0, p2: 0, p50: 0, p95: 0, p98: 0 };
     return {
       min: sliceValues[0],
       max: sliceValues[sliceValues.length - 1],
@@ -156,11 +157,15 @@ const MetaboliteHeatmap = forwardRef(function MetaboliteHeatmap(
 
     const filename = forcedName || `heatmap_${metabolite}_z${sliceIndex}.png`;
     return new Promise((resolve) => {
-      canvas.toBlob((blob) => {
-        if (!blob) return resolve(false);
-        downloadBlob(blob, filename);
-        resolve(true);
-      }, "image/png", 1.0);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return resolve(false);
+          downloadBlob(blob, filename);
+          resolve(true);
+        },
+        "image/png",
+        1.0,
+      );
     });
   };
 
@@ -178,7 +183,10 @@ const MetaboliteHeatmap = forwardRef(function MetaboliteHeatmap(
         csv += `${i},${j},${sliceIndex},${metabolite},${val}\n`;
       }
     }
-    downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `heatmap_${metabolite}_z${sliceIndex}.csv`);
+    downloadBlob(
+      new Blob([csv], { type: "text/csv;charset=utf-8" }),
+      `heatmap_${metabolite}_z${sliceIndex}.csv`,
+    );
   };
 
   useImperativeHandle(ref, () => ({
@@ -213,7 +221,8 @@ const MetaboliteHeatmap = forwardRef(function MetaboliteHeatmap(
       for (let j = 0; j < Y; j++) {
         const key = `${i}_${j}_${sliceIndex}`;
         const raw = volumeData[key]?.[metabolite];
-        const rawVal = typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
+        const rawVal =
+          typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
 
         let value01 = 0;
         if (norm.log) {
@@ -222,7 +231,8 @@ const MetaboliteHeatmap = forwardRef(function MetaboliteHeatmap(
           const vv = Math.log1p(Math.max(0, rawVal));
           value01 = b > a ? (vv - a) / (b - a) : 0;
         } else {
-          value01 = norm.hi > norm.lo ? (rawVal - norm.lo) / (norm.hi - norm.lo) : 0;
+          value01 =
+            norm.hi > norm.lo ? (rawVal - norm.lo) / (norm.hi - norm.lo) : 0;
         }
 
         ctx.fillStyle = colormap(value01);
@@ -309,7 +319,15 @@ const MetaboliteHeatmap = forwardRef(function MetaboliteHeatmap(
     const raw = volumeData[key]?.[metabolite];
     const rawVal = typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
 
-    return { x: i, y: j, z: sliceIndex, rawVal, mode, lo: norm.lo, hi: norm.hi };
+    return {
+      x: i,
+      y: j,
+      z: sliceIndex,
+      rawVal,
+      mode,
+      lo: norm.lo,
+      hi: norm.hi,
+    };
   };
 
   const handleCanvasMove = (e) => {
@@ -383,15 +401,34 @@ const MetaboliteHeatmap = forwardRef(function MetaboliteHeatmap(
           <option value="log">Log</option>
         </select>
 
-        <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}>
-          <input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} />
+        <label
+          style={{
+            fontSize: 12,
+            display: "flex",
+            gap: 6,
+            alignItems: "center",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={showGrid}
+            onChange={(e) => setShowGrid(e.target.checked)}
+          />
           Grille
         </label>
 
-        <button className="btn-secondary" onClick={() => exportPNG()} style={{ fontSize: 12 }}>
+        <button
+          className="btn-secondary"
+          onClick={() => exportPNG()}
+          style={{ fontSize: 12 }}
+        >
           Export PNG
         </button>
-        <button className="btn-secondary" onClick={exportCSV} style={{ fontSize: 12 }}>
+        <button
+          className="btn-secondary"
+          onClick={exportCSV}
+          style={{ fontSize: 12 }}
+        >
           Export CSV
         </button>
       </div>
@@ -402,9 +439,9 @@ const MetaboliteHeatmap = forwardRef(function MetaboliteHeatmap(
         onMouseMove={handleCanvasMove}
         onMouseLeave={handleCanvasLeave}
         style={{
-          width: "100%",         
+          width: "100%",
           maxWidth: maxCanvas,
-          aspectRatio: "1 / 1",  
+          aspectRatio: "1 / 1",
           display: "block",
           margin: "0 auto",
           borderRadius: 12,
@@ -414,12 +451,14 @@ const MetaboliteHeatmap = forwardRef(function MetaboliteHeatmap(
 
       {hover && (
         <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted)" }}>
-          ({hover.x},{hover.y},{hover.z}) — raw: <b>{hover.rawVal.toFixed(4)}</b>
+          ({hover.x},{hover.y},{hover.z}) — raw:{" "}
+          <b>{hover.rawVal.toFixed(4)}</b>
         </div>
       )}
 
       <div style={{ marginTop: 10, fontSize: 11, color: "var(--text-muted)" }}>
-        lo: {Number(norm.lo).toFixed(2)} • p95: {Number(stats.p95).toFixed(2)} • hi: {Number(norm.hi).toFixed(2)}
+        lo: {Number(norm.lo).toFixed(2)} • p95: {Number(stats.p95).toFixed(2)} •
+        hi: {Number(norm.hi).toFixed(2)}
       </div>
     </div>
   );
