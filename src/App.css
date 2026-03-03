@@ -1470,3 +1470,6 @@ canvas {
     margin-right: var(--sidebar-collapsed-width);
   }
 }
+:root {
+  --accent: #5b8cff;
+}

@@ -138,6 +138,12 @@ function App() {
   const [examModalOpen, setExamModalOpen] = useState(false);
   const [examModalCardIds, setExamModalCardIds] = useState([]);
 
+
+  const updateMrsiDataForCard = (cardId, nextMrsiData) => {
+  setIrmCards((prev) =>
+    prev.map((c) => (c.id === cardId ? { ...c, mrsiData: nextMrsiData } : c)),
+  );
+};
   // ===============================
   // Version history helpers
   // ===============================
@@ -778,9 +784,6 @@ function App() {
     }
   };
 
-  // ===============================
-  // Post-Traitement per card (parallel-safe + versions)
-  // ===============================
   const runTraitement = async (
     dataInstance,
     cardId,
@@ -805,7 +808,6 @@ function App() {
         if (params[k] !== undefined) validParams[k] = params[k];
       });
 
-      // PATCH: backend expects "metabolites" (not "meta")
       if ("meta" in validParams) {
         validParams.metabolites = validParams.meta;
         delete validParams.meta;
@@ -839,19 +841,27 @@ function App() {
 
       const next = data?.[key];
       console.log("Résultat traitement:", next);
+
       if (!next) throw new Error("Réponse traitement inattendue.");
       if (next?.error) throw new Error(next.error);
+
+    
+
+      if (
+        (next?.type === "MRSI" || next?.type === "MRSI_VOLUME") &&
+        dataInstance?.voxel
+      ) {
+        if (!next.voxel) next.voxel = dataInstance.voxel;
+      }
 
       const label = catalog[typeTraitement]?.label || typeTraitement;
 
       if (next.type === "IRM") {
         setIrmResults(next);
         pushVersionToCard(cardId, "IRM", label, next, validParams);
-
       } else if (next.type === "MRSI" || next.type === "MRSI_VOLUME") {
         setMrsiResults(next);
         pushVersionToCard(cardId, "MRSI", label, next, validParams);
-
       } else {
         throw new Error(`Type traitement inconnu: ${next.type}`);
       }
@@ -863,14 +873,15 @@ function App() {
       setCardLoading(cardId, false);
     }
   };
-
   const runTraitementOnAllCards = async () => {
     const dt = traitementParams.dataType;
 
     const tasks = irmCards.map(async (card) => {
+      
       const instance =
         dt === "IRM" ? card.irmData : dt === "MRSI" ? card.mrsiData : null;
       if (!instance) return;
+      
       return runTraitement(
         instance,
         card.id,
@@ -885,14 +896,13 @@ function App() {
   // ===============================
   // UI Pieces
   // ===============================
-  // Remplace renderHome() par cette version
   const renderHome = () => (
     <div className="home">
       {/* HERO */}
       <div className="home-hero card">
         <div className="home-hero-left">
           <div className="home-kicker">
-            <span className="pill">🏥 Plateforme Cancer</span>
+            <span className="pill">Glioblastoma Relapse Prediction Platform</span>
             <span className={`pill ${backendStatus ? "pill-ok" : "pill-bad"}`}>
               {backendStatus ? "✅ Backend connecté" : "⚠️ Backend hors ligne"}
             </span>
@@ -1129,7 +1139,7 @@ function App() {
       <div className={`sidebar ${isSidebarCollapsed ? "collapsed" : ""}`}>
         <div className="sidebar-header">
           <span className="emoji">🏥</span>
-          <h1>Cancer Platform</h1>
+          <h1>GliomaGuard</h1>
         </div>
 
         <button
@@ -1232,6 +1242,7 @@ function App() {
                 onSelectIrmVersion={(versionId) =>
                   selectIrmVersion(card.id, versionId)
                 }
+                onUpdateMrsiData={(nextMrsi) => updateMrsiDataForCard(card.id, nextMrsi)}
                 onSelectMrsiVersion={(versionId) =>
                   selectMrsiVersion(card.id, versionId)
                 }
@@ -1452,7 +1463,6 @@ function App() {
           {isRightSidebarCollapsed ? "←" : "→"}
         </button>
 
-        {/*     IRM view: keep Post-Traitement UI */}
         {view === "irm" && (
           <div className="nav-links">
             {/* Traitement choice */}

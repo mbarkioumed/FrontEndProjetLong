@@ -581,14 +581,14 @@ const uploadMissingFilesBatch = async (pairs, concurrency = 3) => {
     try {
       if (!Object.keys(fileMap).length) {
         throw new Error(
-          "Pour quantifier, il faut sélectionner un dossier dataset (sinon le front ne peut pas uploader les fichiers manquants).",
+          "Pour prédire, il faut sélectionner un dossier dataset (sinon le front ne peut pas uploader les fichiers manquants).",
         );
       }
 
       const selectedRequests = buildSelectedExamRequests();
       if (!selectedRequests.length) throw new Error("Aucun examen sélectionné.");
 
-      log("Quantification start", {
+      log("Prediction start", {
         selectedExams: selectedRequests.length,
         treatmentName,
       });
@@ -655,7 +655,7 @@ if (hasAnyError(r1)) {
   });
   return;
 }
-        log("Quantification done", r2);
+        log("Prediction done", r2);
 
         setQuant({
           loading: false,
@@ -674,7 +674,7 @@ if (hasAnyError(r1)) {
         info: "",
       });
     } catch (e) {
-      errorLog("Quantification error", e?.message || e);
+      errorLog("Prediction error", e?.message || e);
       setQuant({
         loading: false,
         error: e.message || String(e),
@@ -714,7 +714,7 @@ if (hasAnyError(r1)) {
             alignItems: "center",
           }}
         >
-          <strong>Quantification</strong>
+          <strong>Prédiction</strong>
           <span style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>
             {selectedCount} examen(s) sélectionné(s)
           </span>
@@ -740,7 +740,7 @@ if (hasAnyError(r1)) {
             onClick={handleQuantifySelected}
             disabled={quant.loading || loading || selectedCount === 0}
           >
-            {quant.loading ? "Quantification..." : "Quantifier"}
+            {quant.loading ? "Prédiction..." : "Prédire"}
           </button>
 
           <button

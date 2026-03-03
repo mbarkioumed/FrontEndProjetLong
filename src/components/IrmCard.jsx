@@ -1,11 +1,11 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import SliceCanvas from "./SliceCanvas";
-
+import QuantVoxelPanel from "./QuantVoxelPanel";
+import CollapsiblePanel from "./CollapsiblePanel";
 import SpectrumChart from "./SpectrumChart";
 import { getData } from "../utils/dataCache";
-
 import MetaboliteHeatmap from "./MetaboliteHeatmap";
-
+import MetaboliteHistogram from "./MetaboliteHistogram";
 // Helpers orientation 2D
 const transpose2D = (m) => {
   if (!m || !m.length) return m;
@@ -19,6 +19,18 @@ const transpose2D = (m) => {
   }
   return result;
 };
+const HEATMAP_METABOLITES = [
+  "Cr",
+  "PCh",
+  "GSH",
+  "Glu",
+  "NAA",
+  "Gln",
+  "Lac",
+  "mI",
+  "Asp",
+];
+
 const flipX2D = (m) => m.map((row) => new Uint8Array(row).reverse());
 const flipY2D = (m) => [...m].reverse();
 const rot90CW2D = (m) => flipX2D(transpose2D(m));
@@ -42,8 +54,10 @@ const inversePoint = (x, y, width, height, o = {}) => {
     py = y;
   let w = width,
     h = height;
+
   if (o.flipY) py = h - 1 - py;
   if (o.flipX) px = w - 1 - px;
+
   if (o.rotate === 180) {
     px = w - 1 - px;
     py = h - 1 - py;
@@ -60,6 +74,7 @@ const inversePoint = (x, y, width, height, o = {}) => {
     py = ny;
     [w, h] = [h, w];
   }
+
   if (o.transpose) {
     const nx = py;
     const ny = px;
@@ -67,6 +82,7 @@ const inversePoint = (x, y, width, height, o = {}) => {
     py = ny;
     [w, h] = [h, w];
   }
+
   return { x: px, y: py };
 };
 
@@ -75,6 +91,7 @@ const forwardPoint = (x, y, width, height, o = {}) => {
     py = y;
   let w = width,
     h = height;
+
   if (o.transpose) {
     const nx = py;
     const ny = px;
@@ -82,6 +99,7 @@ const forwardPoint = (x, y, width, height, o = {}) => {
     py = ny;
     [w, h] = [h, w];
   }
+
   if (o.rotate === 90) {
     const nx = h - 1 - py;
     const ny = px;
@@ -98,8 +116,10 @@ const forwardPoint = (x, y, width, height, o = {}) => {
     px = w - 1 - px;
     py = h - 1 - py;
   }
+
   if (o.flipX) px = w - 1 - px;
   if (o.flipY) py = h - 1 - py;
+
   return { x: px, y: py };
 };
 
@@ -118,7 +138,7 @@ const IrmCard = ({
   onDuplicate,
   onDelete,
   onDeleteVersion,
-  renderUploadForm,
+  renderUploadForm: renderUploadFormProp,
   onFetchSpectrum,
   job,
   maskData,
@@ -131,10 +151,27 @@ const IrmCard = ({
   onUpdateMrsiData,
 }) => {
   const [isOpen, setIsOpen] = useState(true);
-
-
-  //      Focus modal state
-  const [focusedView, setFocusedView] = useState(null); // "sagittal" | "coronal" | "axial" | null
+  const renderUpload =
+    typeof renderUploadFormProp === "function"
+      ? renderUploadFormProp
+      : (type, id) => (
+          <div
+            style={{
+              padding: "0.75rem",
+              borderRadius: 10,
+              border: "1px dashed var(--border-color)",
+              color: "var(--text-muted)",
+              fontSize: 12,
+              textAlign: "center",
+            }}
+          >
+            Upload indisponible : renderUploadForm n’a pas été passé à IrmCard
+            <br />
+            <b>{type}</b> — card <b>{id}</b>
+          </div>
+        );
+  // Focus modal state
+  const [focusedView, setFocusedView] = useState(null);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -157,7 +194,6 @@ const IrmCard = ({
   const [mrsiSliceIndex, setMrsiSliceIndex] = useState(0);
   const [selectedVoxel, setSelectedVoxel] = useState(null);
   const [currentSpectrum, setCurrentSpectrum] = useState(null);
-  const [prevMrsiData, setPrevMrsiData] = useState(null);
 
   // --- FUSION STATE ---
   const [fusionData, setFusionData] = useState(null);
@@ -167,68 +203,71 @@ const IrmCard = ({
   const [isFusing, setIsFusing] = useState(false);
   const [fusionError, setFusionError] = useState(null);
 
-  // --- FUSION HANDLER ---
-  const handleFusionClick = async () => {
-    if (!irmData || !mrsiData) return;
-    setIsFusing(true);
-    setFusionError(null);
-    try {
-      const mriName = irmData.nom_fichier || irmData.nom;
-      const mrsiName = mrsiData.nom;
-
-      let url = `http://127.0.0.1:8000/fusion/?mri=${mriName}&mrsi=${mrsiName}&force_center=${forceCenter}`;
-      if (fusionChannel !== "") {
-        url += `&channel=${fusionChannel}`;
-      }
-
-      const res = await fetch(url);
-      const json = await res.json();
-
-      if (json.error) throw new Error(json.error);
-
-      const binaryString = window.atob(json.data_b64);
-      const len = binaryString.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-
-      setFusionData({
-        ...json,
-        data_uint8: bytes,
-        transform_matrix: json.transform_matrix,
-      });
-    } catch (e) {
-      console.error("Fusion error", e);
-      setFusionError(e.message);
-    } finally {
-      setIsFusing(false);
-    }
-  };
-
-  //      detect version changes too
   const irmVersionKey = irmData?.__versionId || "none";
   const mrsiVersionKey = mrsiData?.__versionId || "none";
 
-  //      Slider for Concentration Heatmap
-  const [heatmapSlice, setHeatmapSlice] = useState(0);
+  const voxelKey = useMemo(() => {
+    const v = mrsiData?.voxel;
+    if (!v || v.x == null || v.y == null || v.z == null) return "none";
+    return `${v.x},${v.y},${v.z}`;
+  }, [mrsiData?.voxel?.x, mrsiData?.voxel?.y, mrsiData?.voxel?.z]);
 
-  
   useEffect(() => {
-    if (mrsiData?.type === "MRSI_VOLUME" && mrsiData?.quantification) {
-      console.log(
-        "Quantification keys:",
-        Object.keys(mrsiData.quantification)
-      );
-
-      console.log(
-        "First voxel:",
-        Object.values(mrsiData.quantification)[0]
-      );
+    if (voxelKey === "none") {
+      setSelectedVoxel(null);
+      return;
     }
-  }, [mrsiData]);
+    setSelectedVoxel(mrsiData.voxel);
+  }, [voxelKey]);
 
-  // Sync IRM data changes
+  const prevMrsiVersionKeyRef = useRef(mrsiVersionKey);
+  useEffect(() => {
+    const prevKey = prevMrsiVersionKeyRef.current;
+    if (mrsiVersionKey !== prevKey) {
+      prevMrsiVersionKeyRef.current = mrsiVersionKey;
+
+      if (mrsiData?.shape) setMrsiSliceIndex(Math.floor(mrsiData.shape[2] / 2));
+      else setMrsiSliceIndex(0);
+
+      if (
+        mrsiData?.voxel?.x != null &&
+        mrsiData?.voxel?.y != null &&
+        mrsiData?.voxel?.z != null
+      ) {
+        setSelectedVoxel(mrsiData.voxel);
+        setCurrentSpectrum(null); // avoid mismatch after traitement
+      } else {
+        setSelectedVoxel(null);
+        setCurrentSpectrum(null);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mrsiVersionKey]);
+
+  const [heatmapSlice, setHeatmapSlice] = useState(0);
+  useEffect(() => {
+    const vz = mrsiData?.voxel?.z;
+    if (typeof vz === "number" && Number.isFinite(vz)) setHeatmapSlice(vz);
+  }, [mrsiData?.voxel?.z]);
+  const [histMetabolite, setHistMetabolite] = useState(HEATMAP_METABOLITES[0]);
+
+  const heatmapRefs = useRef({}); // { Cr: instance, ... }
+
+  const setHeatmapRef = (m) => (instance) => {
+    if (instance) heatmapRefs.current[m] = instance;
+    else delete heatmapRefs.current[m]; 
+  };
+  const exportAllHeatmapsPNG = async () => {
+    const z = heatmapSlice;
+
+    for (const m of HEATMAP_METABOLITES) {
+      const r = heatmapRefs.current[m];
+      if (r?.exportPNG) {
+        await r.exportPNG(`card${cardId}_heatmap_${m}_z${z}.png`);
+        await new Promise((res) => setTimeout(res, 120));
+      }
+    }
+  };
   useEffect(() => {
     if (irmData !== prevIrmData) {
       setPrevIrmData(irmData);
@@ -252,23 +291,6 @@ const IrmCard = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [irmData, irmVersionKey]);
 
-  // Sync MRSI data changes
-  useEffect(() => {
-    if (mrsiData !== prevMrsiData) {
-      setPrevMrsiData(mrsiData);
-      if (mrsiData?.shape) {
-        setMrsiSliceIndex(Math.floor(mrsiData.shape[2] / 2));
-        setSelectedVoxel(null);
-        setCurrentSpectrum(null);
-      } else {
-        setMrsiSliceIndex(0);
-        setSelectedVoxel(null);
-        setCurrentSpectrum(null);
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mrsiData, mrsiVersionKey]);
-
   const orientIRM = ORIENTATION_DEFAULTS;
 
   // --- MEMOIZED IRM SLICES ---
@@ -284,7 +306,7 @@ const IrmCard = ({
       slice.push(vol.subarray(offset, offset + Z));
     }
     return orient2D(slice, orientIRM.sagittal);
-  }, [irmData?.dataRef, irmData?.shape, sliceIndices.sagittal, orientIRM.sagittal]);
+  }, [irmData?.dataRef, irmData?.shape, sliceIndices.sagittal]);
 
   const corOriented = useMemo(() => {
     const vol = getData(irmData?.dataRef);
@@ -299,7 +321,7 @@ const IrmCard = ({
       slice.push(row);
     }
     return orient2D(slice, orientIRM.coronal);
-  }, [irmData?.dataRef, irmData?.shape, sliceIndices.coronal, orientIRM.coronal]);
+  }, [irmData?.dataRef, irmData?.shape, sliceIndices.coronal]);
 
   const axOriented = useMemo(() => {
     const vol = getData(irmData?.dataRef);
@@ -314,7 +336,7 @@ const IrmCard = ({
       slice.push(row);
     }
     return orient2D(slice, orientIRM.axial);
-  }, [irmData?.dataRef, irmData?.shape, sliceIndices.axial, orientIRM.axial]);
+  }, [irmData?.dataRef, irmData?.shape, sliceIndices.axial]);
 
   // --- MULTI-LAYER SLICES ---
   const hasLayers = irmLayers.length > 1;
@@ -325,18 +347,32 @@ const IrmCard = ({
       .filter((l) => l.visible)
       .map((layer) => {
         const vol = getData(layer.data?.dataRef);
-        if (!vol || !layer.data?.shape) return { data2D: null, opacity: layer.opacity, color: layer.color };
+        if (!vol || !layer.data?.shape)
+          return {
+            data2D: null,
+            opacity: layer.opacity,
+            color: layer.color,
+          };
         const [X, Y, Z] = layer.data.shape;
         const sx = sliceIndices.sagittal;
-        if (sx < 0 || sx >= X) return { data2D: null, opacity: layer.opacity, color: layer.color };
+        if (sx < 0 || sx >= X)
+          return {
+            data2D: null,
+            opacity: layer.opacity,
+            color: layer.color,
+          };
         const slice = [];
         for (let y = 0; y < Y; y++) {
           const offset = sx * Y * Z + y * Z;
           slice.push(vol.subarray(offset, offset + Z));
         }
-        return { data2D: orient2D(slice, orientIRM.sagittal), opacity: layer.opacity, color: layer.color };
+        return {
+          data2D: orient2D(slice, orientIRM.sagittal),
+          opacity: layer.opacity,
+          color: layer.color,
+        };
       });
-  }, [hasLayers, irmLayers, sliceIndices.sagittal, orientIRM.sagittal]);
+  }, [hasLayers, irmLayers, sliceIndices.sagittal]);
 
   const corLayerSlices = useMemo(() => {
     if (!hasLayers) return null;
@@ -344,19 +380,33 @@ const IrmCard = ({
       .filter((l) => l.visible)
       .map((layer) => {
         const vol = getData(layer.data?.dataRef);
-        if (!vol || !layer.data?.shape) return { data2D: null, opacity: layer.opacity, color: layer.color };
+        if (!vol || !layer.data?.shape)
+          return {
+            data2D: null,
+            opacity: layer.opacity,
+            color: layer.color,
+          };
         const [X, Y, Z] = layer.data.shape;
         const sy = sliceIndices.coronal;
-        if (sy < 0 || sy >= Y) return { data2D: null, opacity: layer.opacity, color: layer.color };
+        if (sy < 0 || sy >= Y)
+          return {
+            data2D: null,
+            opacity: layer.opacity,
+            color: layer.color,
+          };
         const slice = [];
         for (let x = 0; x < X; x++) {
           const row = new Uint8Array(Z);
           for (let z = 0; z < Z; z++) row[z] = vol[x * Y * Z + sy * Z + z];
           slice.push(row);
         }
-        return { data2D: orient2D(slice, orientIRM.coronal), opacity: layer.opacity, color: layer.color };
+        return {
+          data2D: orient2D(slice, orientIRM.coronal),
+          opacity: layer.opacity,
+          color: layer.color,
+        };
       });
-  }, [hasLayers, irmLayers, sliceIndices.coronal, orientIRM.coronal]);
+  }, [hasLayers, irmLayers, sliceIndices.coronal]);
 
   const axLayerSlices = useMemo(() => {
     if (!hasLayers) return null;
@@ -364,34 +414,48 @@ const IrmCard = ({
       .filter((l) => l.visible)
       .map((layer) => {
         const vol = getData(layer.data?.dataRef);
-        if (!vol || !layer.data?.shape) return { data2D: null, opacity: layer.opacity, color: layer.color };
+        if (!vol || !layer.data?.shape)
+          return {
+            data2D: null,
+            opacity: layer.opacity,
+            color: layer.color,
+          };
         const [X, Y, Z] = layer.data.shape;
         const sz = sliceIndices.axial;
-        if (sz < 0 || sz >= Z) return { data2D: null, opacity: layer.opacity, color: layer.color };
+        if (sz < 0 || sz >= Z)
+          return {
+            data2D: null,
+            opacity: layer.opacity,
+            color: layer.color,
+          };
         const slice = [];
         for (let x = 0; x < X; x++) {
           const row = new Uint8Array(Y);
           for (let y = 0; y < Y; y++) row[y] = vol[x * Y * Z + y * Z + sz];
           slice.push(row);
         }
-        return { data2D: orient2D(slice, orientIRM.axial), opacity: layer.opacity, color: layer.color };
+        return {
+          data2D: orient2D(slice, orientIRM.axial),
+          opacity: layer.opacity,
+          color: layer.color,
+        };
       });
-  }, [hasLayers, irmLayers, sliceIndices.axial, orientIRM.axial]);
+  }, [hasLayers, irmLayers, sliceIndices.axial]);
 
+  // MASK SLICES
   const maskSagOriented = useMemo(() => {
     const vol = getData(maskData?.dataRef);
     if (!vol || !maskData?.shape) return null;
     const [X, Y, Z] = maskData.shape;
     const sx = sliceIndices.sagittal;
     if (sx < 0 || sx >= X) return null;
-
     const slice = [];
     for (let y = 0; y < Y; y++) {
       const offset = sx * Y * Z + y * Z;
       slice.push(vol.subarray(offset, offset + Z));
     }
     return orient2D(slice, orientIRM.sagittal);
-  }, [maskData?.dataRef, maskData?.shape, sliceIndices.sagittal, orientIRM.sagittal]);
+  }, [maskData?.dataRef, maskData?.shape, sliceIndices.sagittal]);
 
   const maskCorOriented = useMemo(() => {
     const vol = getData(maskData?.dataRef);
@@ -399,7 +463,6 @@ const IrmCard = ({
     const [X, Y, Z] = maskData.shape;
     const sy = sliceIndices.coronal;
     if (sy < 0 || sy >= Y) return null;
-
     const slice = [];
     for (let x = 0; x < X; x++) {
       const row = new Uint8Array(Z);
@@ -407,7 +470,7 @@ const IrmCard = ({
       slice.push(row);
     }
     return orient2D(slice, orientIRM.coronal);
-  }, [maskData?.dataRef, maskData?.shape, sliceIndices.coronal, orientIRM.coronal]);
+  }, [maskData?.dataRef, maskData?.shape, sliceIndices.coronal]);
 
   const maskAxOriented = useMemo(() => {
     const vol = getData(maskData?.dataRef);
@@ -415,7 +478,6 @@ const IrmCard = ({
     const [X, Y, Z] = maskData.shape;
     const sz = sliceIndices.axial;
     if (sz < 0 || sz >= Z) return null;
-
     const slice = [];
     for (let x = 0; x < X; x++) {
       const row = new Uint8Array(Y);
@@ -423,8 +485,9 @@ const IrmCard = ({
       slice.push(row);
     }
     return orient2D(slice, orientIRM.axial);
-  }, [maskData?.dataRef, maskData?.shape, sliceIndices.axial, orientIRM.axial]);
+  }, [maskData?.dataRef, maskData?.shape, sliceIndices.axial]);
 
+  // dims
   const sliceDims = useMemo(() => {
     if (!irmData?.shape) return null;
     const [X, Y, Z] = irmData.shape;
@@ -450,6 +513,42 @@ const IrmCard = ({
     };
   }, [irmData?.shape, sagOriented, corOriented, axOriented]);
 
+  // --- FUSION HANDLER ---
+  const handleFusionClick = async () => {
+    if (!irmData || !mrsiData) return;
+    setIsFusing(true);
+    setFusionError(null);
+    try {
+      const mriName = irmData.nom_fichier || irmData.nom;
+      const mrsiName = mrsiData.nom;
+
+      let url = `http://127.0.0.1:8000/fusion/?mri=${encodeURIComponent(
+        mriName,
+      )}&mrsi=${encodeURIComponent(mrsiName)}&force_center=${forceCenter}`;
+      if (fusionChannel !== "") url += `&channel=${fusionChannel}`;
+
+      const res = await fetch(url);
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+
+      const binaryString = window.atob(json.data_b64);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
+
+      setFusionData({
+        ...json,
+        data_uint8: bytes,
+        transform_matrix: json.transform_matrix,
+      });
+    } catch (e) {
+      console.error("Fusion error", e);
+      setFusionError(e.message);
+    } finally {
+      setIsFusing(false);
+    }
+  };
+
   // --- MEMOIZED FUSION SLICES ---
   const fusionSag = useMemo(() => {
     if (!fusionData || !fusionData.data_uint8 || !irmData?.shape) return null;
@@ -465,7 +564,7 @@ const IrmCard = ({
       slice.push(vol.subarray(offset, offset + Z));
     }
     return orient2D(slice, orientIRM.sagittal);
-  }, [fusionData, irmData?.shape, sliceIndices.sagittal, orientIRM.sagittal]);
+  }, [fusionData, irmData?.shape, sliceIndices.sagittal]);
 
   const fusionCor = useMemo(() => {
     if (!fusionData || !fusionData.data_uint8 || !irmData?.shape) return null;
@@ -481,7 +580,7 @@ const IrmCard = ({
       slice.push(row);
     }
     return orient2D(slice, orientIRM.coronal);
-  }, [fusionData, irmData?.shape, sliceIndices.coronal, orientIRM.coronal]);
+  }, [fusionData, irmData?.shape, sliceIndices.coronal]);
 
   const fusionAx = useMemo(() => {
     if (!fusionData || !fusionData.data_uint8 || !irmData?.shape) return null;
@@ -497,27 +596,7 @@ const IrmCard = ({
       slice.push(row);
     }
     return orient2D(slice, orientIRM.axial);
-  }, [fusionData, irmData?.shape, sliceIndices.axial, orientIRM.axial]);
-
-  // --- MEMOIZED MRSI SLICE ---
-  const mrsiSlice = useMemo(() => {
-    if (!mrsiData?.shape) return [];
-    let dataUint8 = mrsiData.data_uint8;
-    if (!dataUint8 && mrsiData.dataRef) dataUint8 = getData(mrsiData.dataRef);
-    if (!dataUint8) return [];
-
-    const [X, Y, Z] = mrsiData.shape;
-    const z = mrsiSliceIndex;
-    if (z < 0 || z >= Z) return [];
-
-    const slice = [];
-    for (let x = 0; x < X; x++) {
-      const row = new Uint8Array(Y);
-      for (let y = 0; y < Y; y++) row[y] = dataUint8[x * Y * Z + y * Z + z];
-      slice.push(row);
-    }
-    return slice;
-  }, [mrsiData, mrsiSliceIndex]);
+  }, [fusionData, irmData?.shape, sliceIndices.axial]);
 
   const safeNum = (v) => (typeof v === "number" ? v : null);
 
@@ -531,23 +610,19 @@ const IrmCard = ({
 
   const handleVoxelClick = async (xVal, yVal, zVal = null) => {
     if (!mrsiData?.shape) return;
-    const [X, Y] = mrsiData.shape;
+    const [X, Y, Z] = mrsiData.shape;
+
     const x = Math.max(0, Math.min(xVal, X - 1));
     const y = Math.max(0, Math.min(yVal, Y - 1));
-    const z = zVal !== null ? zVal : mrsiSliceIndex;
+    const z =
+      zVal !== null ? Math.max(0, Math.min(zVal, Z - 1)) : mrsiSliceIndex;
 
-    if (zVal !== null) setMrsiSliceIndex(z);
-
+    setMrsiSliceIndex(z);
+    setHeatmapSlice(z);
     setSelectedVoxel({ x, y, z });
 
-    // 🔹 Important : propager le voxel sélectionné dans mrsiData
     if (mrsiData) {
-      const updatedMrsi = {
-        ...mrsiData,
-        voxel: { x, y, z }
-      };
-
-      // ⚠️ Ici tu dois appeler le parent pour mettre à jour la carte
+      const updatedMrsi = { ...mrsiData, voxel: { x, y, z } };
       onUpdateMrsiData && onUpdateMrsiData(updatedMrsi);
     }
 
@@ -562,6 +637,7 @@ const IrmCard = ({
   };
 
   const currentIrmVersion = irmData?.__versionId || "base";
+  const currentMrsiVersion = mrsiData?.__versionId || "base";
 
   const activeIrmVersion = useMemo(() => {
     if (!irmHistory?.length) return null;
@@ -570,13 +646,11 @@ const IrmCard = ({
 
   const irmParamsText = useMemo(() => {
     if (!activeIrmVersion?.params) return null;
-
     return Object.entries(activeIrmVersion.params)
       .map(([k, v]) => `${k}: ${v}`)
       .join(" | ");
   }, [activeIrmVersion]);
 
-  const currentMrsiVersion = mrsiData?.__versionId || "base";
   const activeMrsiVersion = useMemo(() => {
     if (!mrsiHistory?.length) return null;
     return mrsiHistory.find((v) => v.id === currentMrsiVersion) || null;
@@ -584,13 +658,11 @@ const IrmCard = ({
 
   const mrsiParamsText = useMemo(() => {
     if (!activeMrsiVersion?.params) return null;
-
     return Object.entries(activeMrsiVersion.params)
       .map(([k, v]) => `${k}: ${v}`)
       .join(" | ");
   }, [activeMrsiVersion]);
 
-  //      Carte vide : upload forms
   if (!irmData && !mrsiData) {
     return (
       <div
@@ -629,19 +701,31 @@ const IrmCard = ({
 
         <h3>Nouvelle Carte</h3>
 
+        {/* Grid heatmaps (taille vraiment réduite) */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: "1rem",
+            gridTemplateColumns: "repeat(3, max-content)",
+            justifyContent: "center",
+            gap: 12,
+            marginTop: 12,
           }}
         >
-          <div onClick={(e) => e.stopPropagation()}>
-            {renderUploadForm("IRM", cardId)}
-          </div>
-          <div onClick={(e) => e.stopPropagation()}>
-            {renderUploadForm("MRSI", cardId)}
-          </div>
+          {HEATMAP_METABOLITES.map((m) => (
+            <div key={m} style={{ width: 140 }}>
+              <MetaboliteHeatmap
+                ref={setHeatmapRef(m)}
+                metabolite={m}
+                volumeData={mrsiData.quantification}
+                dimensions={mrsiData.dimensions}
+                sliceIndex={heatmapSlice}
+                cursorVoxel={selectedVoxel || mrsiData?.voxel} 
+                onVoxelClick={(x, y, z) => handleVoxelClick(x, y, z)}
+                width={90}
+                height={90}
+              />
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -662,7 +746,6 @@ const IrmCard = ({
     axDispH,
   } = sliceDims || {};
 
-  
   return (
     <>
       <div
@@ -673,26 +756,37 @@ const IrmCard = ({
         onKeyDown={(e) => {
           if (e.key === "Enter") handleSelectCard();
         }}
-        style={{ cursor: onSelect ? "pointer" : "default", display: "flex", flexDirection: "column", gap: "1rem" }}
+        style={{
+          cursor: onSelect ? "pointer" : "default",
+          display: "flex",
+          flexDirection: "column",
+          gap: "1rem",
+        }}
       >
-        {/* ===== header ===== */}
-        {/* Ligne 1 : titre + actions boutons */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
+        {/* Header */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            justifyContent: "space-between",
+          }}
+        >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span
-                style={{
-                  cursor: "pointer",
-                  fontSize: 14,
-                  marginRight: 8,
-                  userSelect: "none",
-                }}
-                onClick={(e) => {
-                  e.stopPropagation(); // pour pas déclencher le onClick de la card
-                  setIsOpen(!isOpen);
-                }}
-                title={isOpen ? "Réduire" : "Développer"}
-              >
-                {isOpen ? "▼" : "▶"}
+              style={{
+                cursor: "pointer",
+                fontSize: 14,
+                marginRight: 8,
+                userSelect: "none",
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsOpen(!isOpen);
+              }}
+              title={isOpen ? "Réduire" : "Développer"}
+            >
+              {isOpen ? "▼" : "▶"}
             </span>
 
             <h2 style={{ margin: 0 }}>
@@ -702,7 +796,6 @@ const IrmCard = ({
             </h2>
           </div>
 
-          {/* Dupliquer / Supprimer */}
           <div style={{ display: "flex", gap: "0.5rem" }}>
             <button
               className="btn-secondary"
@@ -727,8 +820,10 @@ const IrmCard = ({
         </div>
 
         {isOpen && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-            {/* Ligne 2 : versions à gauche, fusion à droite */}
+          <div
+            style={{ display: "flex", flexDirection: "column", gap: "1rem" }}
+          >
+            {/* Versions + Fusion */}
             <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
               <div
                 style={{
@@ -739,13 +834,19 @@ const IrmCard = ({
                   flexDirection: "column",
                   gap: "0.75rem",
                   boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-                  flex: "1 1 0", // = 50% de la ligne
-                  minWidth: 0, 
+                  flex: "1 1 0",
+                  minWidth: 0,
                 }}
               >
-                {/*      Versions selectors (IRM / MRSI) */}
                 {irmData && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      flexWrap: "wrap",
+                    }}
+                  >
                     <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
                       IRM version:
                     </span>
@@ -808,7 +909,14 @@ const IrmCard = ({
                 )}
 
                 {mrsiData && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      flexWrap: "wrap",
+                    }}
+                  >
                     <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
                       MRSI version:
                     </span>
@@ -871,8 +979,6 @@ const IrmCard = ({
                 )}
               </div>
 
-              {/* === Right: Fusion Controls === */}
-              {/* === Right: Fusion Controls as mini-card === */}
               {irmData && mrsiData && (
                 <div
                   style={{
@@ -888,9 +994,16 @@ const IrmCard = ({
                     alignSelf: "flex-start",
                   }}
                 >
-                  {/* Titre  + bouton*/}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <strong style={{ fontSize: 13, marginBottom: 4 }}>Fusion MRI-MRSI</strong>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <strong style={{ fontSize: 13, marginBottom: 4 }}>
+                      Fusion MRI-MRSI
+                    </strong>
 
                     <button
                       className="btn-primary"
@@ -898,7 +1011,9 @@ const IrmCard = ({
                       disabled={isFusing}
                       style={{ fontSize: 12, padding: "0.3rem 0.5rem" }}
                     >
-                      {isFusing ? "Fusion en cours..." : "Générer / Mettre à jour"}
+                      {isFusing
+                        ? "Fusion en cours..."
+                        : "Générer / Mettre à jour"}
                     </button>
                   </div>
 
@@ -918,7 +1033,14 @@ const IrmCard = ({
                     Force Center
                   </label>
 
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: 12 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.3rem",
+                      fontSize: 12,
+                    }}
+                  >
                     <span>Metabolite Index:</span>
                     <input
                       type="number"
@@ -931,7 +1053,14 @@ const IrmCard = ({
                   </div>
 
                   {fusionData && (
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: 12 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.3rem",
+                        fontSize: 12,
+                      }}
+                    >
                       <span>Opacité:</span>
                       <input
                         type="range"
@@ -939,7 +1068,9 @@ const IrmCard = ({
                         max="1"
                         step="0.05"
                         value={fusionOpacity}
-                        onChange={(e) => setFusionOpacity(parseFloat(e.target.value))}
+                        onChange={(e) =>
+                          setFusionOpacity(parseFloat(e.target.value))
+                        }
                         style={{ flex: 1 }}
                       />
                       <span>{Math.round(fusionOpacity * 100)}%</span>
@@ -947,14 +1078,15 @@ const IrmCard = ({
                   )}
 
                   {fusionError && (
-                    <div style={{ color: "var(--danger)", fontSize: 11 }}>{fusionError}</div>
+                    <div style={{ color: "var(--danger)", fontSize: 11 }}>
+                      {fusionError}
+                    </div>
                   )}
                 </div>
               )}
             </div>
-            
-            
-            {/* --- LAYER CONTROLS --- */}
+
+            {/* Layers */}
             {hasLayers && onUpdateLayer && (
               <div
                 style={{
@@ -967,7 +1099,13 @@ const IrmCard = ({
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
+                <strong
+                  style={{
+                    fontSize: 13,
+                    display: "block",
+                    marginBottom: 8,
+                  }}
+                >
                   🎨 Couches IRM ({irmLayers.length})
                 </strong>
 
@@ -976,7 +1114,7 @@ const IrmCard = ({
                     display: "flex",
                     gap: 12,
                     alignItems: "center",
-                    flexWrap: "wrap", // s’adapte si la largeur est trop petite
+                    flexWrap: "wrap",
                   }}
                 >
                   {irmLayers.map((layer, idx) => (
@@ -985,14 +1123,13 @@ const IrmCard = ({
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: 4,           // moins d’espace entre éléments
+                        gap: 4,
                         opacity: layer.visible ? 1 : 0.4,
                         padding: "2px 4px",
-                        minWidth: 0,       // permet au flex de réduire la largeur
-                        flex: "1 1 auto",  // chaque couche s’adapte à la largeur dispo
+                        minWidth: 0,
+                        flex: "1 1 auto",
                       }}
                     >
-                      {/* Color dot */}
                       <span
                         style={{
                           width: 12,
@@ -1004,7 +1141,6 @@ const IrmCard = ({
                         }}
                       />
 
-                      {/* Label */}
                       <span
                         style={{
                           fontSize: 12,
@@ -1017,10 +1153,11 @@ const IrmCard = ({
                         {layer.label}
                       </span>
 
-                      {/* Visibility toggle */}
                       <button
                         type="button"
-                        onClick={() => onUpdateLayer(idx, { visible: !layer.visible })}
+                        onClick={() =>
+                          onUpdateLayer(idx, { visible: !layer.visible })
+                        }
                         style={{
                           background: "none",
                           border: "none",
@@ -1034,21 +1171,28 @@ const IrmCard = ({
                         {layer.visible ? "👁" : "🚫"}
                       </button>
 
-                      {/* Opacity slider */}
                       <input
                         type="range"
                         min="0"
                         max="100"
                         value={Math.round(layer.opacity * 100)}
                         onChange={(e) =>
-                          onUpdateLayer(idx, { opacity: parseInt(e.target.value, 10) / 100 })
+                          onUpdateLayer(idx, {
+                            opacity: parseInt(e.target.value, 10) / 100,
+                          })
                         }
                         style={{ flex: 1, minWidth: 60 }}
                         title={`Opacité: ${Math.round(layer.opacity * 100)}%`}
                       />
 
-                      {/* Pourcentage */}
-                      <span style={{ fontSize: 11, color: "var(--text-muted)", minWidth: 28, textAlign: "right" }}>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-muted)",
+                          minWidth: 28,
+                          textAlign: "right",
+                        }}
+                      >
                         {Math.round(layer.opacity * 100)}%
                       </span>
                     </div>
@@ -1056,10 +1200,9 @@ const IrmCard = ({
                 </div>
               </div>
             )}
-           </div>
+          </div>
         )}
 
-        {/* per-card job status */}
         {job?.error && (
           <div style={{ color: "var(--danger)", marginBottom: "0.5rem" }}>
             {job.error}
@@ -1072,7 +1215,6 @@ const IrmCard = ({
         )}
 
         <div className="viz-grid viz-grid-compact">
-          {/* --- IRM --- */}
           {irmData && (
             <>
               {/* Sagittal */}
@@ -1090,7 +1232,7 @@ const IrmCard = ({
                       yDisp,
                       sagDispW,
                       sagDispH,
-                      orientIRM.sagittal
+                      orientIRM.sagittal,
                     );
                     setSliceIndices((prev) => ({
                       ...prev,
@@ -1104,7 +1246,7 @@ const IrmCard = ({
                     sagW,
                     sagH,
                     cursor3D?.z,
-                    cursor3D?.y
+                    cursor3D?.y,
                   )}
                 />
                 <input
@@ -1136,7 +1278,7 @@ const IrmCard = ({
                       yDisp,
                       corDispW,
                       corDispH,
-                      orientIRM.coronal
+                      orientIRM.coronal,
                     );
                     const nx = p.y;
                     const ny = p.x;
@@ -1154,22 +1296,13 @@ const IrmCard = ({
                       const y = sliceIndices.coronal;
                       const z = ny;
                       const i = Math.round(
-                        M[0][0] * x +
-                          M[0][1] * y +
-                          M[0][2] * z +
-                          M[0][3]
+                        M[0][0] * x + M[0][1] * y + M[0][2] * z + M[0][3],
                       );
                       const j = Math.round(
-                        M[1][0] * x +
-                          M[1][1] * y +
-                          M[1][2] * z +
-                          M[1][3]
+                        M[1][0] * x + M[1][1] * y + M[1][2] * z + M[1][3],
                       );
                       const k = Math.round(
-                        M[2][0] * x +
-                          M[2][1] * y +
-                          M[2][2] * z +
-                          M[2][3]
+                        M[2][0] * x + M[2][1] * y + M[2][2] * z + M[2][3],
                       );
                       handleVoxelClick(i, j, k);
                     }
@@ -1179,10 +1312,8 @@ const IrmCard = ({
                     corW,
                     corH,
                     sliceIndices.axial,
-                    sliceIndices.sagittal
+                    sliceIndices.sagittal,
                   )}
-                  sliceLineH={sliceIndices.axial}
-                  sliceLineV={sliceIndices.sagittal}
                 />
                 <input
                   type="range"
@@ -1203,8 +1334,8 @@ const IrmCard = ({
                 <SliceCanvas
                   data={axOriented}
                   layers={axLayerSlices}
-                  overlay={fusionAx}
-                  opacity={fusionOpacity}
+                  overlay={fusionAx ? fusionAx : maskAxOriented}
+                  opacity={fusionAx ? fusionOpacity : 0.45}
                   title={`Axial (Z=${sliceIndices.axial})`}
                   onFocus={() => setFocusedView("axial")}
                   onClick={(xDisp, yDisp) => {
@@ -1213,7 +1344,7 @@ const IrmCard = ({
                       yDisp,
                       axDispW,
                       axDispH,
-                      orientIRM.axial
+                      orientIRM.axial,
                     );
                     const mriX = p.y;
                     const mriY = p.x;
@@ -1231,22 +1362,13 @@ const IrmCard = ({
                       const y = mriY;
                       const z = sliceIndices.axial;
                       const i = Math.round(
-                        M[0][0] * x +
-                          M[0][1] * y +
-                          M[0][2] * z +
-                          M[0][3]
+                        M[0][0] * x + M[0][1] * y + M[0][2] * z + M[0][3],
                       );
                       const j = Math.round(
-                        M[1][0] * x +
-                          M[1][1] * y +
-                          M[1][2] * z +
-                          M[1][3]
+                        M[1][0] * x + M[1][1] * y + M[1][2] * z + M[1][3],
                       );
                       const k = Math.round(
-                        M[2][0] * x +
-                          M[2][1] * y +
-                          M[2][2] * z +
-                          M[2][3]
+                        M[2][0] * x + M[2][1] * y + M[2][2] * z + M[2][3],
                       );
                       handleVoxelClick(i, j, k);
                     }
@@ -1256,7 +1378,7 @@ const IrmCard = ({
                     axW,
                     axH,
                     cursor3D?.y,
-                    cursor3D?.x
+                    cursor3D?.x,
                   )}
                 />
                 <input
@@ -1273,189 +1395,243 @@ const IrmCard = ({
                 />
               </div>
 
-              {/* --- Spectrum (inline) --- */}
-              <div className="slice-control spectrum-inline">
-                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textAlign: "center", marginBottom: 2 }}>
-                  Spectre MRSI
-                </div>
-                {currentSpectrum ? (
-                  <SpectrumChart
-                    data={currentSpectrum}
-                    label={`Voxel (${selectedVoxel?.x}, ${selectedVoxel?.y}, ${selectedVoxel?.z})`}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      flex: 1,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderRadius: "8px",
-                      color: "var(--text-muted)",
-                      fontSize: 11,
-                      textAlign: "center",
-                      padding: "0.5rem",
-                      minHeight: 80,
-                    }}
-                  >
-                    {mrsiData
-                      ? fusionData
-                        ? "Cliquez sur l'IRM fusionnée"
-                        : "Cliquez sur l'IRM"
-                      : "Pas de MRSI"}
+              {/* Spectrum */}
+              <div
+                className="slice-control spectrum-inline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <CollapsiblePanel
+                  title={`Spectre MRSI ${
+                    selectedVoxel
+                      ? `– Voxel (${selectedVoxel.x}, ${selectedVoxel.y}, ${selectedVoxel.z})`
+                      : ""
+                  }`}
+                  defaultOpen={true}
+                >
+                  <div style={{ minHeight: 120 }}>
+                    {currentSpectrum ? (
+                      <SpectrumChart
+                        data={currentSpectrum}
+                        label={`Voxel (${selectedVoxel?.x}, ${selectedVoxel?.y}, ${selectedVoxel?.z})`}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          height: 120,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          borderRadius: "8px",
+                          color: "var(--text-muted)",
+                          fontSize: 11,
+                          textAlign: "center",
+                          padding: "0.5rem",
+                        }}
+                      >
+                        {mrsiData
+                          ? fusionData
+                            ? "Cliquez sur l'IRM fusionnée"
+                            : "Cliquez sur l'IRM"
+                          : "Pas de MRSI"}
+                      </div>
+                    )}
                   </div>
-                )}
+                </CollapsiblePanel>
               </div>
             </>
           )}
         </div>
 
-              {/* --- Quantification Results --- */}
-              {mrsiData?.quantification && mrsiData.type === "MRSI" && (
+        {/* Quantification voxel */}
+        {mrsiData?.quantification && mrsiData.type === "MRSI" && (
+          <CollapsiblePanel
+            title={`Quantification – Voxel (${mrsiData?.voxel?.x ?? "?"}, ${
+              mrsiData?.voxel?.y ?? "?"
+            }, ${mrsiData?.voxel?.z ?? "?"})`}
+            defaultOpen={true}
+          >
+            <QuantVoxelPanel
+              quant={mrsiData.quantification}
+              voxel={mrsiData.voxel}
+              method={mrsiData?.method || mrsiData?._version_params?.method}
+            />
+          </CollapsiblePanel>
+        )}
+
+        {/* Heatmaps */}
+        {mrsiData?.type === "MRSI_VOLUME" && (
+          <CollapsiblePanel
+            title="Quantification – Heatmaps"
+            defaultOpen={false}
+          >
+            <div
+              style={{
+                marginTop: "0.5rem",
+                padding: "0.75rem",
+                borderRadius: 12,
+                border: "1px solid var(--border-color)",
+                background: "rgba(255,255,255,0.03)",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                }}
+              >
+                <button
+                  className="btn-primary"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    exportAllHeatmapsPNG();
+                  }}
+                  style={{ fontSize: 12 }}
+                >
+                  Export ALL PNG (slice Z={heatmapSlice})
+                </button>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <label style={{ fontSize: 12 }}>
+                    Slice Z : {heatmapSlice}
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max={(mrsiData.dimensions?.Z || 1) - 1}
+                    value={heatmapSlice}
+                    onChange={(e) =>
+                      setHeatmapSlice(parseInt(e.target.value, 10))
+                    }
+                  />
+                </div>
+              </div>
+
+              {/* Histogram */}
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 10,
+                  borderRadius: 12,
+                  border: "1px solid var(--border-color)",
+                  background: "rgba(0,0,0,0.05)",
+                }}
+              >
                 <div
                   style={{
-                    marginTop: "0.75rem",
-                    padding: "0.75rem",
-                    borderRadius: 12,
-                    border: "1px solid var(--border-color)",
-                    background: "rgba(255,255,255,0.03)",
-                    fontSize: 13,
+                    display: "flex",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    alignItems: "center",
                   }}
                 >
-                  <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                    Quantification – Voxel ({mrsiData.voxel?.x}, {mrsiData.voxel?.y}, {mrsiData.voxel?.z})
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>
+                    📊 Histogramme (slice Z={heatmapSlice})
                   </div>
 
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {Object.entries(mrsiData.quantification)
-                      .sort((a, b) => b[1] - a[1])
-                      .map(([met, value]) => (
-                        <div key={met} style={{ display: "flex", justifyContent: "space-between" }}>
-                          <span>{met}</span>
-                          <span style={{ fontWeight: 500 }}>
-                            {Number(value).toFixed(4)}
-                          </span>
-                        </div>
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 8 }}
+                  >
+                    <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                      Métabolite:
+                    </span>
+                    <select
+                      value={histMetabolite}
+                      onChange={(e) => setHistMetabolite(e.target.value)}
+                      style={{
+                        fontSize: 12,
+                        padding: "4px 8px",
+                        borderRadius: 10,
+                        background: "var(--bg-secondary)",
+                        color: "var(--text-main)",
+                        border: "1px solid var(--border-color)",
+                      }}
+                    >
+                      {HEATMAP_METABOLITES.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
                       ))}
+                    </select>
                   </div>
+
+                  {selectedVoxel?.x != null &&
+                    selectedVoxel?.y != null &&
+                    selectedVoxel?.z != null && (
+                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                        Voxel: ({selectedVoxel.x},{selectedVoxel.y},
+                        {selectedVoxel.z})
+                      </div>
+                    )}
                 </div>
-              )}
 
-              {mrsiData?.type === "MRSI_VOLUME" && (
-                <div
-                  style={{
-                    marginTop: "0.75rem",
-                    padding: "0.75rem",
-                    borderRadius: 12,
-                    border: "1px solid var(--border-color)",
-                    background: "rgba(255,255,255,0.03)",
-                  }}
-                >
-                  <div style={{ fontWeight: 600, marginBottom: 10 }}>
-                    Quantification – Heatmaps
-                  </div>
-
-                  {/* Slider Z */}
-                  <div style={{ marginTop: 10 }}>
-                    <label>Slice Z : {heatmapSlice}</label>
-                    <input
-                      type="range"
-                      min="0"
-                      max={(mrsiData.dimensions?.Z || 1) - 1}
-                      value={heatmapSlice}
-                      onChange={(e) =>
-                        setHeatmapSlice(parseInt(e.target.value, 10))
-                      }
-                    />
-                  </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem", marginTop: 12 }}>
-
-                    <MetaboliteHeatmap
-                      volumeData={mrsiData.quantification}
-                      dimensions={mrsiData.dimensions}
-                      metabolite="Cr"
-                      sliceIndex={heatmapSlice}
-                    />
-
-                    <MetaboliteHeatmap
-                      volumeData={mrsiData.quantification}
-                      dimensions={mrsiData.dimensions}
-                      metabolite="PCh"
-                      sliceIndex={heatmapSlice}
-                    />
-
-                    <MetaboliteHeatmap
-                      volumeData={mrsiData.quantification}
-                      dimensions={mrsiData.dimensions}
-                      metabolite="GSH"
-                      sliceIndex={heatmapSlice}
-                    />
-
-                    <MetaboliteHeatmap
-                      volumeData={mrsiData.quantification}
-                      dimensions={mrsiData.dimensions}
-                      metabolite="Glu"
-                      sliceIndex={heatmapSlice}
-                    />
-
-                    <MetaboliteHeatmap
-                      volumeData={mrsiData.quantification}
-                      dimensions={mrsiData.dimensions}
-                      metabolite="NAA"
-                      sliceIndex={heatmapSlice}
-                    />
-
-                    <MetaboliteHeatmap
-                      volumeData={mrsiData.quantification}
-                      dimensions={mrsiData.dimensions}
-                      metabolite="Gln"
-                      sliceIndex={heatmapSlice}
-                    />
-
-                    <MetaboliteHeatmap
-                      volumeData={mrsiData.quantification}
-                      dimensions={mrsiData.dimensions}
-                      metabolite="Lac"
-                      sliceIndex={heatmapSlice}
-                    />
-
-                    <MetaboliteHeatmap
-                      volumeData={mrsiData.quantification}
-                      dimensions={mrsiData.dimensions}
-                      metabolite="mI"
-                      sliceIndex={heatmapSlice}
-                    />
-                    <MetaboliteHeatmap
-                      volumeData={mrsiData.quantification}
-                      dimensions={mrsiData.dimensions}
-                      metabolite="Asp"
-                      sliceIndex={heatmapSlice}
-                    />
-
-                  </div>
-
-                  <div style={{ marginTop: 10, fontSize: 12 }}>
-                    Voxels traités : {mrsiData.processed_voxels} / {mrsiData.total_voxels}
-                  </div>
+                <div style={{ marginTop: 10 }}>
+                  <MetaboliteHistogram
+                    volumeData={mrsiData.quantification}
+                    dimensions={mrsiData.dimensions}
+                    metabolite={histMetabolite}
+                    sliceIndex={heatmapSlice}
+                    selectedVoxel={selectedVoxel || mrsiData?.voxel}
+                    width={720}
+                    height={160}
+                    bins={28}
+                  />
                 </div>
-              )}
+              </div>
 
-
-        {/* --- Upload if missing --- */}
+{/* Grid heatmaps responsive */}
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 16,
+    marginTop: 12,
+    alignItems: "start",
+  }}
+>
+  {HEATMAP_METABOLITES.map((m) => (
+    <MetaboliteHeatmap
+      key={m}
+      ref={setHeatmapRef(m)}
+      metabolite={m}
+      volumeData={mrsiData.quantification}
+      dimensions={mrsiData.dimensions}
+      sliceIndex={heatmapSlice}
+      cursorVoxel={selectedVoxel || mrsiData?.voxel}  
+      onVoxelClick={(x, y, z) => handleVoxelClick(x, y, z)}
+      size={140}                                      
+      maxCanvas={160}                        
+    />
+  ))}
+</div>
+              <div style={{ marginTop: 10, fontSize: 12 }}>
+                Voxels traités : {mrsiData.processed_voxels} /{" "}
+                {mrsiData.total_voxels}
+              </div>
+            </div>
+          </CollapsiblePanel>
+        )}
         {!irmData && (
-          <div className="slice-control card" onClick={(e) => e.stopPropagation()}>
-            {renderUploadForm("IRM", cardId)}
+          <div
+            className="slice-control card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {renderUpload("IRM", cardId)}
           </div>
         )}
         {!mrsiData && (
-          <div className="slice-control card" onClick={(e) => e.stopPropagation()}>
-            {renderUploadForm("MRSI", cardId)}
+          <div
+            className="slice-control card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {renderUpload("MRSI", cardId)}
           </div>
         )}
       </div>
 
-      {/* ====== MODAL VIEW AGRANDIE ====== */}
+      {/* Focus modal */}
       {focusedView && (
         <div
           className="focus-overlay"
@@ -1466,11 +1642,16 @@ const IrmCard = ({
           <div className="focus-modal" onClick={(e) => e.stopPropagation()}>
             <div className="focus-header">
               <div className="focus-title">
-                {focusedView === "sagittal" && `Sagittal (X=${sliceIndices.sagittal})`}
-                {focusedView === "coronal" && `Coronal (Y=${sliceIndices.coronal})`}
+                {focusedView === "sagittal" &&
+                  `Sagittal (X=${sliceIndices.sagittal})`}
+                {focusedView === "coronal" &&
+                  `Coronal (Y=${sliceIndices.coronal})`}
                 {focusedView === "axial" && `Axial (Z=${sliceIndices.axial})`}
               </div>
-              <button className="btn-secondary" onClick={() => setFocusedView(null)}>
+              <button
+                className="btn-secondary"
+                onClick={() => setFocusedView(null)}
+              >
                 ✕
               </button>
             </div>
@@ -1488,7 +1669,7 @@ const IrmCard = ({
                       yDisp,
                       sagDispW,
                       sagDispH,
-                      orientIRM.sagittal
+                      orientIRM.sagittal,
                     );
                     setSliceIndices((prev) => ({
                       ...prev,
@@ -1502,7 +1683,7 @@ const IrmCard = ({
                     sagW,
                     sagH,
                     cursor3D?.z,
-                    cursor3D?.y
+                    cursor3D?.y,
                   )}
                 />
               )}
@@ -1519,7 +1700,7 @@ const IrmCard = ({
                       yDisp,
                       corDispW,
                       corDispH,
-                      orientIRM.coronal
+                      orientIRM.coronal,
                     );
                     const nx = p.y;
                     const ny = p.x;
@@ -1537,22 +1718,13 @@ const IrmCard = ({
                       const y = sliceIndices.coronal;
                       const z = ny;
                       const i = Math.round(
-                        M[0][0] * x +
-                          M[0][1] * y +
-                          M[0][2] * z +
-                          M[0][3]
+                        M[0][0] * x + M[0][1] * y + M[0][2] * z + M[0][3],
                       );
                       const j = Math.round(
-                        M[1][0] * x +
-                          M[1][1] * y +
-                          M[1][2] * z +
-                          M[1][3]
+                        M[1][0] * x + M[1][1] * y + M[1][2] * z + M[1][3],
                       );
                       const k = Math.round(
-                        M[2][0] * x +
-                          M[2][1] * y +
-                          M[2][2] * z +
-                          M[2][3]
+                        M[2][0] * x + M[2][1] * y + M[2][2] * z + M[2][3],
                       );
                       handleVoxelClick(i, j, k);
                     }
@@ -1562,7 +1734,7 @@ const IrmCard = ({
                     corW,
                     corH,
                     sliceIndices.axial,
-                    sliceIndices.sagittal
+                    sliceIndices.sagittal,
                   )}
                 />
               )}
@@ -1570,8 +1742,8 @@ const IrmCard = ({
               {focusedView === "axial" && (
                 <SliceCanvas
                   data={axOriented}
-                  overlay={fusionAx}
-                  opacity={fusionOpacity}
+                  overlay={fusionAx ? fusionAx : maskAxOriented}
+                  opacity={fusionAx ? fusionOpacity : 0.45}
                   title={`Axial (zoom)`}
                   onClick={(xDisp, yDisp) => {
                     const p = inversePoint(
@@ -1579,7 +1751,7 @@ const IrmCard = ({
                       yDisp,
                       axDispW,
                       axDispH,
-                      orientIRM.axial
+                      orientIRM.axial,
                     );
                     const mriX = p.y;
                     const mriY = p.x;
@@ -1597,22 +1769,13 @@ const IrmCard = ({
                       const y = mriY;
                       const z = sliceIndices.axial;
                       const i = Math.round(
-                        M[0][0] * x +
-                          M[0][1] * y +
-                          M[0][2] * z +
-                          M[0][3]
+                        M[0][0] * x + M[0][1] * y + M[0][2] * z + M[0][3],
                       );
                       const j = Math.round(
-                        M[1][0] * x +
-                          M[1][1] * y +
-                          M[1][2] * z +
-                          M[1][3]
+                        M[1][0] * x + M[1][1] * y + M[1][2] * z + M[1][3],
                       );
                       const k = Math.round(
-                        M[2][0] * x +
-                          M[2][1] * y +
-                          M[2][2] * z +
-                          M[2][3]
+                        M[2][0] * x + M[2][1] * y + M[2][2] * z + M[2][3],
                       );
                       handleVoxelClick(i, j, k);
                     }
@@ -1622,7 +1785,7 @@ const IrmCard = ({
                     axW,
                     axH,
                     cursor3D?.y,
-                    cursor3D?.x
+                    cursor3D?.x,
                   )}
                 />
               )}
