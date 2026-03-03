@@ -791,7 +791,7 @@ if (hasAnyError(r1)) {
             onClick={handleSendDataset}
             disabled={loading || (!datasetJson && !raw.trim())}
           >
-            {loading ? "Envoi..." : "2) Envoyer au backend"}
+            {loading ? "Envoi..." : "Envoyer"}
           </button>
 
           <button
