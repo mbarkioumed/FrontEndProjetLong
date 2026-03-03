@@ -998,7 +998,7 @@ function App() {
             <li>Overlay multi-modalités (à finaliser)</li>
           </ul>
           <button className="link-btn" onClick={() => setView("irm")}>
-            Ouvrir Upload IRM →
+            Ouvrir Exams Visualisation →
           </button>
         </div>
 
@@ -1164,7 +1164,7 @@ function App() {
             onClick={() => setView("irm")}
           >
             <span className="icon">🧠</span>
-            <span className="label">Upload IRM</span>
+            <span className="label">Exams Visualisation</span>
           </div>
 
           <div
@@ -1754,7 +1754,7 @@ function App() {
             >
               <h3 style={{ marginTop: 0 }}>👋 Astuce</h3>
               <p style={{ marginBottom: 0 }}>
-                Va sur <b>Upload IRM</b> pour accéder au post-traitement, ou{" "}
+                Va sur <b>Exams Visualisation</b> pour accéder au post-traitement, ou{" "}
                 <b>Patients</b> pour explorer le dataset.
               </p>
             </div>
