@@ -290,30 +290,33 @@ function App() {
   const [selectedTraitement, setSelectedTraitement] = useState("");
   const [traitementParams, setTraitementParams] = useState({});
 
+  const fetchCatalog = async () => {
+    try {
+      const response = await fetch(`${API_URL}/traitements/catalog`);
+      const data = await response.json();
+      setCatalog(data);
+
+      const firstKey = Object.keys(data)[0] || "";
+      setSelectedTraitement(firstKey);
+
+      const defaults = {};
+      Object.entries(data[firstKey]?.params || {}).forEach(
+        ([k, v]) => (defaults[k] = v.default),
+      );
+      const allowedTypes = data[firstKey]?.type || [];
+      defaults.dataType = allowedTypes[0] || null;
+
+      setTraitementParams(defaults);
+    } catch (err) {
+      console.error("Impossible de charger le catalogue :", err);
+    }
+  };
+
   useEffect(() => {
-    const fetchCatalog = async () => {
-      try {
-        const response = await fetch(`${API_URL}/traitements/catalog`);
-        const data = await response.json();
-        setCatalog(data);
-
-        const firstKey = Object.keys(data)[0] || "";
-        setSelectedTraitement(firstKey);
-
-        const defaults = {};
-        Object.entries(data[firstKey]?.params || {}).forEach(
-          ([k, v]) => (defaults[k] = v.default),
-        );
-        const allowedTypes = data[firstKey]?.type || [];
-        defaults.dataType = allowedTypes[0] || null;
-
-        setTraitementParams(defaults);
-      } catch (err) {
-        console.error("Impossible de charger le catalogue :", err);
-      }
-    };
-    fetchCatalog();
-  }, []);
+    if (backendStatus) {
+      fetchCatalog();
+    }
+  }, [backendStatus]);
 
   useEffect(() => {
     if (!selectedTraitement) return;
@@ -1164,7 +1167,7 @@ function App() {
             onClick={() => setView("irm")}
           >
             <span className="icon">🧠</span>
-            <span className="label">Upload IRM</span>
+            <span className="label">Visualisation</span>
           </div>
 
           <div

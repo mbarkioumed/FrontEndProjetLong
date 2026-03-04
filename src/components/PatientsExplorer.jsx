@@ -1,12 +1,14 @@
-import React, { useContext, useMemo, useState } from "react";
+import React, { useContext, useMemo, useState  } from "react";
 import AuthContext from "../context/AuthContext";
 import { api } from "../api/client";
+import { useEffect } from "react";
 
 /**
  * PatientsExplorer
  * Props:
  *  - onOpenExam: ({ irmFiles: File[], mrsiFile: File|null, maskFile: File|null, meta: {...} }) => Promise<void>
  */
+
 
 const LOG_PREFIX = "[PatientsExplorer]";
 
@@ -171,6 +173,10 @@ export default function PatientsExplorer({ onOpenExam }) {
     }
 
     setDatasetJson(dataset);
+    sessionStorage.setItem(
+      "patientsExplorerDataset",
+      JSON.stringify(dataset)
+    );
     setFileMap(map);
     setRaw(JSON.stringify(dataset, null, 2));
 
@@ -277,7 +283,7 @@ export default function PatientsExplorer({ onOpenExam }) {
     }
     if (!Object.keys(fileMap).length) {
       setErr(
-        "Pour ouvrir automatiquement un examen, il faut sélectionner un dossier (sinon le front n'a pas accès aux fichiers).",
+        "Pour ouvrir un examen, veuillez re-sélectionner le dossier (sinon l'application n'a pas accès aux fichiers).",
       );
       return;
     }
@@ -306,6 +312,7 @@ export default function PatientsExplorer({ onOpenExam }) {
       meta: { patientId, date, exam },
     });
   };
+
 
   // ---------- Quantification helpers ----------
   const examKey = (patientId, date, idx) => `${patientId}__${date}__${idx}`;
@@ -581,7 +588,7 @@ const uploadMissingFilesBatch = async (pairs, concurrency = 3) => {
     try {
       if (!Object.keys(fileMap).length) {
         throw new Error(
-          "Pour prédire, il faut sélectionner un dossier dataset (sinon le front ne peut pas uploader les fichiers manquants).",
+          "Pour prédire, veuillez re-sélectionner le dossier (sinon l'application n'a pas accès aux fichiers).",
         );
       }
 
@@ -683,6 +690,30 @@ if (hasAnyError(r1)) {
       });
     }
   };
+
+  // ---------- Save Patients for current session ----------
+  useEffect(() => {
+    const saved = sessionStorage.getItem("patientsExplorerDataset");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setDatasetJson(parsed);
+        setRaw(JSON.stringify(parsed, null, 2));
+
+        // renvoyer automatiquement au backend
+        api.uploadJsonDataset(parsed, token)
+          .then((data) => {
+            setPatientsTree(data);
+          })
+          .catch((e) => {
+            console.error("Auto reload dataset failed", e);
+          });
+      } catch (e) {
+        console.error("Invalid dataset in sessionStorage");
+        sessionStorage.removeItem("patientsExplorerDataset");
+      }
+    }
+  }, []);
 
   // ---------- selection counts ----------
   const selectedCount = selectedExamKeys.size;
@@ -791,7 +822,7 @@ if (hasAnyError(r1)) {
             onClick={handleSendDataset}
             disabled={loading || (!datasetJson && !raw.trim())}
           >
-            {loading ? "Envoi..." : "2) Envoyer au backend"}
+            {loading ? "Envoi..." : "Envoyer"}
           </button>
 
           <button
@@ -804,12 +835,14 @@ if (hasAnyError(r1)) {
               setErr("");
               setSelectedExamKeys(new Set());
               setQuant({ loading: false, error: "", result: null, info: "" });
+              sessionStorage.removeItem("patientsExplorerDataset");
               log("Reset");
             }}
             disabled={loading || quant.loading}
           >
             Réinitialiser
           </button>
+
         </div>
       </div>
 
@@ -1042,6 +1075,8 @@ if (hasAnyError(r1)) {
           </pre>
         </div>
       )}
+
+
     </div>
   );
 }
