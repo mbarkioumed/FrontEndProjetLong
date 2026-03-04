@@ -144,6 +144,17 @@ function App() {
     prev.map((c) => (c.id === cardId ? { ...c, mrsiData: nextMrsiData } : c)),
   );
 };
+
+  // Sync right sidebar voxel coords when user clicks a voxel on the active card
+  const handleVoxelSelect = (cardId, voxel) => {
+    if (cardId !== activeCardId) return;
+    setTraitementParams((prev) => ({
+      ...prev,
+      x: voxel.x ?? 0,
+      y: voxel.y ?? 0,
+      z: voxel.z ?? 0,
+    }));
+  };
   // ===============================
   // Version history helpers
   // ===============================
@@ -1249,6 +1260,7 @@ function App() {
                 onSelectMrsiVersion={(versionId) =>
                   selectMrsiVersion(card.id, versionId)
                 }
+                onVoxelSelect={(voxel) => handleVoxelSelect(card.id, voxel)}
                 onDeleteVersion={(type, versionId) => {
                   setIrmCards((prev) =>
                     prev.map((c) => {
